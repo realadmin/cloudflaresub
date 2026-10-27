@@ -111,7 +111,8 @@ p {
 
 form.card,
 .tips,
-#resultSection {
+#resultSection,
+#adminSection {
   padding: 24px;
 }
 
@@ -123,6 +124,9 @@ label {
 
 textarea,
 input[type="text"],
+input[type="password"],
+input[type="number"],
+select,
 input[readonly] {
   width: 100%;
   border-radius: 14px;
@@ -135,8 +139,22 @@ input[readonly] {
   outline: none;
 }
 
+/* Retention days input while disabled (permanent storage selected):
+   dimmed box, number hidden but value preserved in the DOM. */
+#retentionDays:disabled,
+.ret-days:disabled {
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  background: rgba(15, 23, 42, 0.45);
+  border-color: rgba(148, 163, 184, 0.08);
+  cursor: not-allowed;
+}
+
 textarea:focus,
 input[type="text"]:focus,
+input[type="password"]:focus,
+input[type="number"]:focus,
+select:focus,
 input[readonly]:focus {
   border-color: rgba(96, 165, 250, 0.72);
   box-shadow: 0 0 0 4px rgba(96, 165, 250, 0.12);
@@ -329,7 +347,8 @@ button.small {
   .hero,
   form.card,
   .tips,
-  #resultSection {
+  #resultSection,
+  #adminSection {
     padding: 18px;
   }
 
@@ -384,7 +403,8 @@ button.small {
   line-height: 1.8;
 }
 
-#resultSection {
+#resultSection,
+#adminSection {
   margin-top: 24px;
 }
 
@@ -563,4 +583,297 @@ button.small {
   .hero-title {
     gap: 10px;
   }
+}
+#retentionDays:disabled::-webkit-outer-spin-button,
+#retentionDays:disabled::-webkit-inner-spin-button,
+.ret-days:disabled::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Keep the retention select and the days input exactly the same height:
+   number inputs honour line-height:1.6 from the shared input rule while
+   selects do not, which made the right box a few px taller. */
+#storageMode,
+#retentionDays {
+  height: 52px;
+  line-height: 1.2;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+/* Expanded per-entry link cards (same cards as the result section),
+   rendered as a detail block under the entry row. */
+.entry-detail {
+  padding: 4px 14px 20px;
+}
+.entry-detail .sub-grid {
+  margin-bottom: 14px;
+}
+
+/* ---- Admin list: entries are blocks (header row + collapsible detail),
+   so an expanded entry's row can stick to the top while its links scroll. ---- */
+.admin-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+}
+.admin-toolbar label {
+  margin: 0;
+}
+.admin-toolbar select {
+  width: auto;
+  min-width: 230px;
+}
+.toolbar-spacer {
+  flex: 1;
+}
+
+.admin-head,
+.entry-row {
+  display: grid;
+  grid-template-columns: minmax(170px, 1fr) 132px 100px minmax(110px, 1fr) 84px 216px;
+  gap: 14px;
+  align-items: center;
+}
+
+.admin-head {
+  padding: 12px 14px;
+  margin-top: 4px;
+  border-radius: 12px;
+  background: rgba(30, 41, 59, 0.68);
+  color: #bfdbfe;
+  font-size: 0.92rem;
+  text-align: center;
+}
+.admin-head span {
+  white-space: nowrap;
+}
+
+.entry {
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+}
+.entry:last-child {
+  border-bottom: none;
+}
+
+.entry-row {
+  padding: 18px 14px;
+  font-size: 0.92rem;
+}
+
+.entry-row .cell {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Created-time, validity and node-count columns read better centered,
+   like their headers */
+.entry-row .cell:nth-child(2),
+.entry-row .cell:nth-child(3),
+.entry-row .cell:nth-child(5) {
+  text-align: center;
+}
+
+/* The sticky magic: while an entry is expanded, its row pins to the top of
+   the viewport so 收起 is always one tap away. When the next expanded entry
+   arrives, the previous row rides away with the end of its own block and
+   the new one takes its place (and vice versa scrolling up). */
+.entry.expanded .entry-row,
+.entry.retention-open .entry-row {
+  position: sticky;
+  top: 10px;
+  z-index: 30;
+  background: rgb(13, 21, 40);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 16px;
+  box-shadow: 0 16px 44px rgba(2, 6, 23, 0.5);
+}
+
+.admin-empty {
+  padding: 18px 14px;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+/* ---- Back-to-top round button ---- */
+.back-top {
+  position: fixed;
+  right: 22px;
+  bottom: 22px;
+  width: 52px;
+  height: 52px;
+  min-height: 52px;
+  padding: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, var(--accent), #2563eb);
+  box-shadow: 0 14px 34px rgba(2, 6, 23, 0.5);
+  z-index: 900;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(10px);
+  transition: opacity 0.25s ease, transform 0.25s ease, visibility 0.25s;
+}
+.back-top.show {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+}
+
+@media (max-width: 920px) {
+  /* Narrow screens: the admin list scrolls sideways instead, and the
+     sticky entry row steps aside (sticky cannot work inside the
+     horizontal scroller). */
+  .admin-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .admin-head,
+  .entry {
+    min-width: 900px;
+  }
+  .entry.expanded .entry-row,
+  .entry.retention-open .entry-row {
+    position: static;
+    box-shadow: none;
+  }
+}
+
+.admin-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 10px; /* row gap 12px, column gap 10px */
+  width: 100%;
+}
+.admin-actions > a {
+  display: block;
+}
+.admin-actions button {
+  width: 100%;
+}
+
+/* Note editor: a tall multi-line box. Long notes wrap, and overflow scrolls
+   inside the box (mouse wheel / dragged scrollbar / touch swipe). */
+#adminSection .note-input {
+  width: 100%;
+  min-width: 0;
+  height: 98px;
+  min-height: 98px;
+  padding: 10px 12px;
+  font-size: 0.92rem;
+  line-height: 1.55;
+  overflow-y: auto;
+  resize: vertical;
+  word-break: break-all;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ---- Touch friendliness (whole page) ---- */
+html {
+  -webkit-tap-highlight-color: rgba(96, 165, 250, 0.12);
+}
+
+button,
+a,
+input,
+select,
+textarea,
+label {
+  touch-action: manipulation; /* no double-tap zoom delay on controls */
+}
+
+@media (pointer: coarse) {
+  /* Apple HIG / Material: touch targets at least ~44-48px, gaps >= 8px */
+  button,
+  button.small {
+    min-height: 48px;
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .admin-actions {
+    gap: 14px 12px;
+  }
+
+  .sub-actions {
+    gap: 12px;
+  }
+
+  .actions {
+    gap: 14px;
+  }
+
+  /* 16px form text stops iOS Safari from auto-zooming on focus */
+  input[type="text"],
+  input[type="password"],
+  input[type="number"],
+  select,
+  textarea {
+    font-size: 16px;
+  }
+
+  .checkbox-wrap {
+    min-height: 52px;
+  }
+
+  .checkbox-wrap input {
+    width: 24px;
+    height: 24px;
+  }
+
+  .table-wrap th,
+  .table-wrap td {
+    padding-top: 16px;
+    padding-bottom: 16px;
+  }
+
+  #adminSection .note-input {
+    font-size: 16px;
+    height: 112px;
+    min-height: 112px;
+  }
+}
+
+/* Save-note feedback states on the button itself */
+#adminSection button[data-save-state="ok"] {
+  border-color: rgba(52, 211, 153, 0.65);
+  color: #6ee7b7;
+}
+#adminSection button[data-save-state="fail"] {
+  border-color: rgba(248, 113, 113, 0.65);
+  color: #fca5a5;
+}
+
+/* ---- Inline retention edit panel ---- */
+.entry-retention {
+  padding: 2px 14px 18px;
+}
+.ret-current {
+  margin-bottom: 12px;
+  font-size: 0.95rem;
+}
+.ret-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+}
+.ret-controls label {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ret-controls select {
+  width: auto;
+  min-width: 230px;
+}
+.ret-controls .ret-days {
+  width: 110px;
+}
+.entry-retention .hint {
+  margin-top: 10px;
 }

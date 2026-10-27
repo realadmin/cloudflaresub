@@ -1,4 +1,5 @@
-// Cloudflare Worker: KV short link subscription + access token protection
+// Cloudflare Pages (_worker.js, advanced mode): KV short link subscription + access token protection
+// Also usable as a plain Worker entry (src/worker.js is kept in sync).
 // Requires:
 // - KV namespace binding: SUB_STORE
 // - Secret/Variable: SUB_ACCESS_TOKEN
@@ -42,21 +43,54 @@ function escapeYaml(str = '') {
     .replace(/\n/g, ' ');
 }
 
+function splitHostAndPort(value) {
+  const v = String(value || '').trim();
+  if (!v) return { server: '', port: undefined };
+
+  // Bracketed IPv6: [2606:4700::1] or [2606:4700::1]:443
+  if (v.startsWith('[')) {
+    const m = v.match(/^\[([^\]]+)](?::(\d+))?$/);
+    if (m) return { server: m[1], port: m[2] ? Number(m[2]) : undefined };
+    return { server: v, port: undefined };
+  }
+
+  // More than one colon and no brackets: a bare IPv6 address.
+  // Never split a "port" off it: 2606:4700:4700::1111 is one address,
+  // the old regex turned it into server "2606:4700:4700:" + port 1111.
+  const colonCount = (v.match(/:/g) || []).length;
+  if (colonCount > 1) return { server: v, port: undefined };
+
+  if (colonCount === 1) {
+    const idx = v.indexOf(':');
+    const host = v.slice(0, idx);
+    const portStr = v.slice(idx + 1);
+    if (/^\d+$/.test(portStr)) return { server: host, port: Number(portStr) };
+  }
+  return { server: v, port: undefined };
+}
+
+function stripBrackets(host) {
+  const h = String(host || '').trim();
+  return h.startsWith('[') && h.endsWith(']') ? h.slice(1, -1) : h;
+}
+
+// IPv6 literals must be bracketed inside a URL authority (vless://u@[::1]:443)
+function formatHostForUrl(host) {
+  const h = String(host || '');
+  return h.includes(':') && !h.startsWith('[') ? `[${h}]` : h;
+}
+
 function parsePreferredEndpoints(input) {
   return String(input || '')
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean)
     .map((line) => {
-      const [raw, remark = ''] = line.split('#');
-      const value = raw.trim();
-      const hashRemark = remark.trim();
-      const match = value.match(/^(.*?)(?::(\d+))?$/);
-      return {
-        server: match?.[1] || value,
-        port: match?.[2] ? Number(match[2]) : undefined,
-        remark: hashRemark,
-      };
+      const hashIdx = line.indexOf('#');
+      const value = (hashIdx >= 0 ? line.slice(0, hashIdx) : line).trim();
+      const remark = (hashIdx >= 0 ? line.slice(hashIdx + 1) : '').trim();
+      const { server, port } = splitHostAndPort(value);
+      return { server, port, remark };
     });
 }
 
@@ -66,7 +100,7 @@ function parseVmess(link) {
   return {
     type: 'vmess',
     name: obj.ps || 'vmess',
-    server: obj.add,
+    server: stripBrackets(obj.add),
     port: Number(obj.port || 443),
     uuid: obj.id,
     cipher: obj.scy || 'auto',
@@ -85,7 +119,8 @@ function parseUrlLike(link, type) {
   return {
     type,
     name: decodeURIComponent(u.hash.replace(/^#/, '')) || type,
-    server: u.hostname,
+    params: Object.fromEntries(u.searchParams),
+    server: stripBrackets(u.hostname),
     port: Number(u.port || 443),
     password: type === 'trojan' ? decodeURIComponent(u.username) : undefined,
     uuid: type === 'vless' ? decodeURIComponent(u.username) : undefined,
@@ -177,42 +212,49 @@ function encodeVmess(node) {
 }
 
 function encodeVless(node) {
-  const url = new URL(`vless://${encodeURIComponent(node.uuid)}@${node.server}:${node.port}`);
-  url.searchParams.set('type', node.network || 'ws');
-  if (node.tls) url.searchParams.set('security', 'tls');
-  if (node.host) url.searchParams.set('host', node.host);
-  if (node.sni) url.searchParams.set('sni', node.sni);
-  if (node.path) url.searchParams.set('path', node.path);
-  if (node.alpn) url.searchParams.set('alpn', node.alpn);
-  if (node.fp) url.searchParams.set('fp', node.fp);
-  if (node.flow) url.searchParams.set('flow', node.flow);
-  url.hash = node.name;
-  return url.toString();
+  // Start from the node's original query params so fields the parser does not
+  // model (e.g. encryption=none) and the original ordering survive a round trip.
+  const params = new URLSearchParams(node.params || {});
+  params.set('type', node.network || 'ws');
+  if (node.tls) params.set('security', 'tls');
+  else if ((params.get('security') || '').toLowerCase() === 'tls') params.delete('security');
+  if (node.host) params.set('host', node.host); else params.delete('host');
+  if (node.sni) params.set('sni', node.sni); else params.delete('sni');
+  if (node.path) params.set('path', node.path);
+  if (node.alpn) params.set('alpn', node.alpn);
+  if (node.fp) params.set('fp', node.fp);
+  if (node.flow) params.set('flow', node.flow); else params.delete('flow');
+  const qs = params.toString();
+  return `vless://${encodeURIComponent(node.uuid)}@${formatHostForUrl(node.server)}:${node.port}${qs ? '?' + qs : ''}#${encodeURIComponent(node.name || '')}`;
 }
 
 function encodeTrojan(node) {
-  const url = new URL(`trojan://${encodeURIComponent(node.password)}@${node.server}:${node.port}`);
-  if (node.network) url.searchParams.set('type', node.network);
-  if (node.tls) url.searchParams.set('security', 'tls');
-  if (node.host) url.searchParams.set('host', node.host);
-  if (node.sni) url.searchParams.set('sni', node.sni);
-  if (node.path) url.searchParams.set('path', node.path);
-  if (node.alpn) url.searchParams.set('alpn', node.alpn);
-  if (node.fp) url.searchParams.set('fp', node.fp);
-  url.hash = node.name;
-  return url.toString();
+  const params = new URLSearchParams(node.params || {});
+  params.set('type', node.network || 'ws');
+  if (node.tls) params.set('security', 'tls');
+  if (node.host) params.set('host', node.host); else params.delete('host');
+  if (node.sni) params.set('sni', node.sni); else params.delete('sni');
+  if (node.path) params.set('path', node.path);
+  if (node.alpn) params.set('alpn', node.alpn);
+  if (node.fp) params.set('fp', node.fp);
+  const qs = params.toString();
+  return `trojan://${encodeURIComponent(node.password)}@${formatHostForUrl(node.server)}:${node.port}${qs ? '?' + qs : ''}#${encodeURIComponent(node.name || '')}`;
+}
+
+function encodeNodeLink(node) {
+  if (node.type === 'vmess') return encodeVmess(node);
+  if (node.type === 'vless') return encodeVless(node);
+  if (node.type === 'trojan') return encodeTrojan(node);
+  return '';
+}
+
+function renderPlain(nodes) {
+  // Plain-text node links, one per line, NOT base64-encoded.
+  return nodes.map(encodeNodeLink).filter(Boolean).join('\n');
 }
 
 function renderRaw(nodes) {
-  const lines = nodes
-    .map((node) => {
-      if (node.type === 'vmess') return encodeVmess(node);
-      if (node.type === 'vless') return encodeVless(node);
-      if (node.type === 'trojan') return encodeTrojan(node);
-      return '';
-    })
-    .filter(Boolean);
-  return b64EncodeUtf8(lines.join('\n'));
+  return b64EncodeUtf8(renderPlain(nodes));
 }
 
 function renderClash(nodes) {
@@ -222,7 +264,7 @@ function renderClash(nodes) {
         const lines = [
           `  - name: "${escapeYaml(node.name)}"`,
           `    type: vmess`,
-          `    server: ${node.server}`,
+          `    server: ${node.server.includes(':') ? '"' + escapeYaml(node.server) + '"' : node.server}`,
           `    port: ${node.port}`,
           `    uuid: ${node.uuid}`,
           `    alterId: 0`,
@@ -252,7 +294,7 @@ function renderClash(nodes) {
         const lines = [
           `  - name: "${escapeYaml(node.name)}"`,
           `    type: vless`,
-          `    server: ${node.server}`,
+          `    server: ${node.server.includes(':') ? '"' + escapeYaml(node.server) + '"' : node.server}`,
           `    port: ${node.port}`,
           `    uuid: ${node.uuid}`,
           `    udp: true`,
@@ -280,7 +322,7 @@ function renderClash(nodes) {
         const lines = [
           `  - name: "${escapeYaml(node.name)}"`,
           `    type: trojan`,
-          `    server: ${node.server}`,
+          `    server: ${node.server.includes(':') ? '"' + escapeYaml(node.server) + '"' : node.server}`,
           `    port: ${node.port}`,
           `    password: "${escapeYaml(node.password || '')}"`,
           `    udp: true`,
@@ -433,7 +475,89 @@ async function buildDedupHash(body) {
   return sha256Hex(JSON.stringify(normalized));
 }
 
+function sanitizeNote(value) {
+  // Owner-written remark identifying an entry (e.g. which VPS it belongs to).
+  return String(value ?? '')
+    .replace(/[\r\n\t]+/g, ' ')
+    .trim()
+    .slice(0, 80);
+}
+
+function notePointerKey(note, id) {
+  return `note:${note}:${id}`;
+}
+
+function buildRecordMetadata(record) {
+  const servers = (record.sources || []).map((x) => x.server).filter(Boolean);
+  const st = record.storage || { mode: 'permanent' };
+  return {
+    note: record.note || '',
+    createdAt: record.createdAt || '',
+    sources: [...new Set(servers)].slice(0, 3).join(',').slice(0, 200),
+    out: Array.isArray(record.nodes) ? record.nodes.length : 0,
+    retention: st.mode === 'days' ? `days:${st.days}` : 'permanent',
+    exp: st.mode === 'days' ? (st.expiresAt || '') : '',
+  };
+}
+
+// Retention chosen by the owner at generate time:
+//   { mode: 'permanent' }           -> stored forever, until manually deleted
+//   { mode: 'days', days: 1..3650 } -> KV auto-deletes after that many days
+function parseRetention(body) {
+  const mode = String(body.storageMode || 'permanent').toLowerCase();
+  if (mode !== 'days') return { storage: { mode: 'permanent' } };
+  const days = Number(body.retentionDays);
+  if (!Number.isInteger(days) || days < 1 || days > 3650) {
+    return { error: '保留天数需要是 1 到 3650 之间的整数' };
+  }
+  return { storage: { mode: 'days', days } };
+}
+
+// (Re)stamp a record's expiry from "now" and return the TTL to write with.
+function applyRetention(record, nowMs) {
+  const st = record.storage || { mode: 'permanent' };
+  if (st.mode === 'days') {
+    const ttl = st.days * 86400;
+    record.storage = { mode: 'days', days: st.days, expiresAt: new Date(nowMs + ttl * 1000).toISOString() };
+    return ttl;
+  }
+  record.storage = { mode: 'permanent' };
+  return undefined;
+}
+
+// TTL to use when rewriting an existing record WITHOUT changing its
+// retention plan (e.g. saving a note): count down to the stored expiry.
+function remainingTtl(record) {
+  const st = record.storage;
+  if (!st || st.mode !== 'days') return undefined;
+  if (st.expiresAt) {
+    const left = Math.ceil((Date.parse(st.expiresAt) - Date.now()) / 1000);
+    return Math.max(60, left);
+  }
+  return st.days ? st.days * 86400 : undefined;
+}
+
+// Records are stored permanently by default, or with an expirationTtl
+// when the owner picked a retention period. Also maintains a
+// human-readable `note:<remark>:<id>` pointer key so the owner can tell
+// entries apart at a glance in the Cloudflare KV browser, where only
+// key names are visible in the list.
+async function putRecord(env, id, record, prevNote = undefined, ttlSeconds = undefined) {
+  const opts = { metadata: buildRecordMetadata(record) };
+  if (ttlSeconds) opts.expirationTtl = ttlSeconds;
+  await env.SUB_STORE.put(`sub:${id}`, JSON.stringify(record), opts);
+  if (prevNote && prevNote !== record.note) {
+    await env.SUB_STORE.delete(notePointerKey(prevNote, id));
+  }
+  if (record.note) {
+    await env.SUB_STORE.put(notePointerKey(record.note, id), id);
+  }
+}
+
 async function handleGenerate(request, env, url) {
+  if (!env.SUB_STORE) {
+    return json({ ok: false, error: '服务端未绑定 KV：请在 Pages 项目 Settings -> Bindings 中添加 KV namespace，变量名必须为 SUB_STORE，然后重新部署' }, 500);
+  }
   let body;
   try {
     body = await request.json();
@@ -453,30 +577,73 @@ async function handleGenerate(request, env, url) {
   };
 
   const nodes = buildNodes(baseNodes, preferredEndpoints, options);
-
-  const payload = {
-    version: 1,
-    createdAt: new Date().toISOString(),
-    options,
-    nodes,
-  };
+  // Remember where the nodes came from BEFORE expansion overwrites the
+  // server with a preferred endpoint: this is how the owner tells which
+  // VPS an entry belongs to.
+  const sources = baseNodes.map((n) => ({
+    type: n.type, name: n.name, server: n.server, port: n.port,
+  }));
+  // The note is metadata only: it is NOT part of the dedup hash.
+  const providedNote = typeof body.note === 'string' && body.note.trim() !== ''
+    ? sanitizeNote(body.note)
+    : null;
+  const retention = parseRetention(body);
+  if (retention.error) return json({ ok: false, error: retention.error }, 400);
 
   const dedupHash = await buildDedupHash(body);
   const dedupKey = `dedup:${dedupHash}`;
 
   let id = await env.SUB_STORE.get(dedupKey);
+  let record;
 
   if (!id) {
     id = await createUniqueShortId(env);
-    const ttl = 60 * 60 * 24 * 7; // 7天
-
-    await env.SUB_STORE.put(`sub:${id}`, JSON.stringify(payload), {
-      expirationTtl: ttl,
-    });
-
-    await env.SUB_STORE.put(dedupKey, id, {
-      expirationTtl: ttl,
-    });
+    record = {
+      version: 2,
+      createdAt: new Date().toISOString(),
+      note: providedNote || '',
+      storage: retention.storage,
+      dedupHash,
+      sources,
+      options,
+      nodes,
+    };
+    const ttl = applyRetention(record, Date.now());
+    await putRecord(env, id, record, undefined, ttl);
+    await env.SUB_STORE.put(dedupKey, id, ttl ? { expirationTtl: ttl } : {});
+  } else {
+    // Same content generated again: reuse the entry. Rewriting it without a
+    // TTL also migrates entries created by older versions (7-day expiry)
+    // to permanent storage, backfills sources, and applies a newly
+    // provided note.
+    const raw = await env.SUB_STORE.get(`sub:${id}`);
+    if (raw) {
+      record = JSON.parse(raw);
+      const prevNote = record.note || '';
+      if (providedNote !== null) record.note = providedNote;
+      if (!record.sources) record.sources = sources;
+      if (!record.dedupHash) record.dedupHash = dedupHash;
+      // The retention picked this time replaces the previous plan, and the
+      // countdown restarts from now.
+      record.storage = retention.storage;
+      record.updatedAt = new Date().toISOString();
+      const ttl = applyRetention(record, Date.now());
+      await putRecord(env, id, record, prevNote, ttl);
+      await env.SUB_STORE.put(dedupKey, id, ttl ? { expirationTtl: ttl } : {});
+    } else {
+      record = {
+        version: 2,
+        createdAt: new Date().toISOString(),
+        note: providedNote || '',
+        storage: retention.storage,
+        dedupHash,
+        sources,
+        options,
+        nodes,
+      };
+      const ttl = applyRetention(record, Date.now());
+      await putRecord(env, id, record, undefined, ttl);
+    }
   }
 
   const origin = url.origin;
@@ -496,9 +663,14 @@ async function handleGenerate(request, env, url) {
     urls: {
       auto: withToken(''),
       raw: withToken('raw'),
+      plain: withToken('plain'),
       clash: withToken('clash'),
       surge: withToken('surge'),
     },
+    note: record.note || '',
+    storage: record.storage || { mode: 'permanent' },
+    links: nodes.map(encodeNodeLink).filter(Boolean),
+    plainText: renderPlain(nodes),
     counts: {
       inputNodes: baseNodes.length,
       preferredEndpoints: preferredEndpoints.length,
@@ -516,6 +688,168 @@ async function handleGenerate(request, env, url) {
   });
 }
 
+function checkAdmin(request, env, url, body) {
+  const expected = env.SUB_ACCESS_TOKEN;
+  if (!expected) {
+    return json({ ok: false, error: '未设置 SUB_ACCESS_TOKEN，出于安全原因管理接口已禁用，请先在 Pages 项目里设置该 Secret' }, 403);
+  }
+  const provided =
+    (body && typeof body.token === 'string' && body.token) ||
+    url.searchParams.get('token') ||
+    request.headers.get('x-admin-token') ||
+    '';
+  if (provided !== expected) {
+    return json({ ok: false, error: '管理令牌不正确' }, 403);
+  }
+  return null;
+}
+
+async function handleList(request, env, url) {
+  if (!env.SUB_STORE) return json({ ok: false, error: 'SUB_STORE KV 未绑定' }, 500);
+  const denied = checkAdmin(request, env, url, null);
+  if (denied) return denied;
+
+  // The key list only tells us WHICH entries exist. Every displayed field
+  // (note, storage plan, ...) is read from the record itself: the list
+  // index's metadata lags behind fresh writes, which first made write
+  // verification report false failures, then made this list show stale
+  // plans right after a verified change. One source of truth: the record.
+  const items = [];
+  let cursor;
+  do {
+    const page = await env.SUB_STORE.list({ prefix: 'sub:', cursor, limit: 256 });
+    for (const key of page.keys) {
+      const id = key.name.slice('sub:'.length);
+      const meta = key.metadata || {};
+      const item = {
+        id,
+        note: meta.note || '',
+        createdAt: meta.createdAt || null,
+        sources: meta.sources ? meta.sources.split(',').filter(Boolean) : [],
+        outputNodes: typeof meta.out === 'number' ? meta.out : null,
+        storage: meta.retention && meta.retention.startsWith('days:')
+          ? { mode: 'days', days: Number(meta.retention.slice(5)) || null, expiresAt: meta.exp || null }
+          : { mode: 'permanent' },
+      };
+      const raw = await env.SUB_STORE.get(key.name);
+      if (raw === null || raw === undefined) {
+        // Ghost key: the list index still enumerates a just-deleted entry.
+        // The record is gone, so the entry must not reappear in the list.
+        continue;
+      }
+      {
+        try {
+          const rec = JSON.parse(raw);
+          item.note = rec.note || '';
+          item.createdAt = rec.createdAt || item.createdAt;
+          const servers = [...new Set((rec.sources || []).map((x) => x.server).filter(Boolean))];
+          if (servers.length) item.sources = servers;
+          if (Array.isArray(rec.nodes)) item.outputNodes = rec.nodes.length;
+          item.storage = rec.storage || { mode: 'permanent' };
+        } catch {}
+      }
+      items.push(item);
+    }
+    cursor = page.list_complete ? undefined : page.cursor;
+  } while (cursor);
+
+  items.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+  return json({ ok: true, count: items.length, items });
+}
+
+// Direct single-record read for write verification. Deliberately NOT built
+// on KV list(): the list index lags behind fresh writes, which made the
+// UI's read-back check report false failures. A point get() reflects the
+// write promptly.
+async function handleEntry(request, env, url) {
+  if (!env.SUB_STORE) return json({ ok: false, error: 'SUB_STORE KV 未绑定' }, 500);
+  const denied = checkAdmin(request, env, url, null);
+  if (denied) return denied;
+  const id = String(url.searchParams.get('id') || '').trim();
+  if (!id) return json({ ok: false, error: '缺少条目 id' }, 400);
+  const raw = await env.SUB_STORE.get(`sub:${id}`);
+  if (!raw) return json({ ok: false, error: '条目不存在' }, 404);
+  let record;
+  try { record = JSON.parse(raw); } catch { return json({ ok: false, error: '条目数据损坏' }, 500); }
+  return json({
+    ok: true,
+    id,
+    note: record.note || '',
+    createdAt: record.createdAt || null,
+    storage: record.storage || { mode: 'permanent' },
+  });
+}
+
+async function handleNote(request, env) {
+  if (!env.SUB_STORE) return json({ ok: false, error: 'SUB_STORE KV 未绑定' }, 500);
+  let body;
+  try { body = await request.json(); } catch { return json({ ok: false, error: '请求体不是合法 JSON' }, 400); }
+  const denied = checkAdmin(request, env, new URL(request.url), body);
+  if (denied) return denied;
+
+  const id = String(body.id || '').trim();
+  if (!id) return json({ ok: false, error: '缺少条目 id' }, 400);
+  const raw = await env.SUB_STORE.get(`sub:${id}`);
+  if (!raw) return json({ ok: false, error: '条目不存在' }, 404);
+
+  const record = JSON.parse(raw);
+  const prevNote = record.note || '';
+  record.note = sanitizeNote(body.note);
+  record.updatedAt = new Date().toISOString();
+  // Rewrite with whatever time the entry has left, so saving a note never
+  // silently extends or shortens a timed entry. Legacy entries (written by
+  // the old 7-day code, no storage plan) have no plan and become permanent.
+  await putRecord(env, id, record, prevNote, remainingTtl(record));
+  return json({ ok: true, id, note: record.note });
+}
+
+async function handleRetention(request, env) {
+  if (!env.SUB_STORE) return json({ ok: false, error: 'SUB_STORE KV 未绑定' }, 500);
+  let body;
+  try { body = await request.json(); } catch { return json({ ok: false, error: '请求体不是合法 JSON' }, 400); }
+  const denied = checkAdmin(request, env, new URL(request.url), body);
+  if (denied) return denied;
+
+  const id = String(body.id || '').trim();
+  if (!id) return json({ ok: false, error: '缺少条目 id' }, 400);
+  const raw = await env.SUB_STORE.get(`sub:${id}`);
+  if (!raw) return json({ ok: false, error: '条目不存在' }, 404);
+
+  const retention = parseRetention({ storageMode: body.mode, retentionDays: body.days });
+  if (retention.error) return json({ ok: false, error: retention.error }, 400);
+
+  const record = JSON.parse(raw);
+  record.storage = retention.storage;
+  record.updatedAt = new Date().toISOString();
+  // Re-apply from NOW: switching to permanent clears the TTL, switching to
+  // days restarts the countdown (same rule as regenerating the entry).
+  const ttl = applyRetention(record, Date.now());
+  await putRecord(env, id, record, record.note || '', ttl);
+  if (record.dedupHash) {
+    await env.SUB_STORE.put(`dedup:${record.dedupHash}`, id, ttl ? { expirationTtl: ttl } : {});
+  }
+  return json({ ok: true, id, storage: record.storage });
+}
+
+async function handleDelete(request, env) {
+  if (!env.SUB_STORE) return json({ ok: false, error: 'SUB_STORE KV 未绑定' }, 500);
+  let body;
+  try { body = await request.json(); } catch { return json({ ok: false, error: '请求体不是合法 JSON' }, 400); }
+  const denied = checkAdmin(request, env, new URL(request.url), body);
+  if (denied) return denied;
+
+  const id = String(body.id || '').trim();
+  if (!id) return json({ ok: false, error: '缺少条目 id' }, 400);
+  const raw = await env.SUB_STORE.get(`sub:${id}`);
+  let record = null;
+  if (raw) { try { record = JSON.parse(raw); } catch {} }
+
+  await env.SUB_STORE.delete(`sub:${id}`);
+  if (record && record.note) await env.SUB_STORE.delete(notePointerKey(record.note, id));
+  if (record && record.dedupHash) await env.SUB_STORE.delete(`dedup:${record.dedupHash}`);
+  return json({ ok: true, id, existed: Boolean(raw) });
+}
+
 function validateAccessToken(url, env) {
   const expected = env.SUB_ACCESS_TOKEN;
   if (!expected) return { ok: true };
@@ -527,6 +861,9 @@ function validateAccessToken(url, env) {
 }
 
 async function handleSub(url, env) {
+  if (!env.SUB_STORE) {
+    return text('Server error: SUB_STORE KV binding is missing. Add it in Pages Settings -> Bindings, then redeploy.', 500);
+  }
   const tokenCheck = validateAccessToken(url, env);
   if (!tokenCheck.ok) return tokenCheck.response;
 
@@ -540,6 +877,9 @@ async function handleSub(url, env) {
   const nodes = record.nodes || [];
   const target = (url.searchParams.get('target') || 'raw').toLowerCase();
 
+  if (target === 'plain' || target === 'links' || target === 'text') {
+    return text(renderPlain(nodes), 200, 'text/plain; charset=utf-8');
+  }
   if (target === 'clash') {
     return text(renderClash(nodes), 200, 'text/yaml; charset=utf-8');
   }
@@ -555,26 +895,57 @@ async function handleSub(url, env) {
 
 export default {
   async fetch(request, env) {
-    const url = new URL(request.url);
+    try {
+      const url = new URL(request.url);
 
-    if (request.method === 'OPTIONS') {
-      return new Response(null, {
-        headers: {
-          'access-control-allow-origin': '*',
-          'access-control-allow-methods': 'GET,POST,OPTIONS',
-          'access-control-allow-headers': 'content-type',
-        },
-      });
+      if (request.method === 'OPTIONS') {
+        return new Response(null, {
+          headers: {
+            'access-control-allow-origin': '*',
+            'access-control-allow-methods': 'GET,POST,OPTIONS',
+            'access-control-allow-headers': 'content-type',
+          },
+        });
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/generate') {
+        return await handleGenerate(request, env, url);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/list') {
+        return await handleList(request, env, url);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/entry') {
+        return await handleEntry(request, env, url);
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/note') {
+        return await handleNote(request, env);
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/retention') {
+        return await handleRetention(request, env);
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/delete') {
+        return await handleDelete(request, env);
+      }
+
+      if (request.method === 'GET' && url.pathname.startsWith('/sub/')) {
+        return await handleSub(url, env);
+      }
+
+      // Pages (advanced mode) always provides the ASSETS binding.
+      // In a plain Worker deployment without an [assets] section this binding
+      // is undefined, and calling env.ASSETS.fetch() throws -> Cloudflare 1101.
+      if (env.ASSETS && typeof env.ASSETS.fetch === 'function') {
+        return await env.ASSETS.fetch(request);
+      }
+      return text('Not found. Static assets are not available: deploy as a Cloudflare Pages project with build output directory "public" (see README).', 404);
+    } catch (err) {
+      // Never let an uncaught exception bubble up as a bare 1101 page.
+      return json({ ok: false, error: 'Internal error: ' + (err && err.message ? err.message : String(err)) }, 500);
     }
-
-    if (request.method === 'POST' && url.pathname === '/api/generate') {
-      return handleGenerate(request, env, url);
-    }
-
-    if (request.method === 'GET' && url.pathname.startsWith('/sub/')) {
-      return handleSub(url, env);
-    }
-
-    return env.ASSETS.fetch(request);
   },
 };
