@@ -53,6 +53,9 @@ form.addEventListener('submit', async (event) => {
     preferredIps: document.getElementById('preferredIps').value,
     namePrefix: document.getElementById('namePrefix').value,
     keepOriginalHost: document.getElementById('keepOriginalHost').checked,
+    // Generating writes to KV, so it carries the same admin token the
+    // owner keeps in the admin section's token box below.
+    token: adminToken(),
     note: document.getElementById('subNote')?.value || '',
     storageMode: document.getElementById('storageMode')?.value || 'permanent',
     retentionDays: Number(document.getElementById('retentionDays')?.value || 30),
@@ -331,7 +334,6 @@ function renderAdminList() {
     updateSelectionUI();
     return;
   }
-  const token = adminToken();
   adminBody.innerHTML = visible
     .map((item) => {
       const created = item.createdAt ? new Date(item.createdAt).toLocaleString('zh-CN', { hour12: false }) : '-';
@@ -369,8 +371,8 @@ async function loadAdminList() {
   sessionStorage.setItem('cfsub_admin_token', token);
   adminMsg.textContent = '加载中...';
   try {
-    const q = new URLSearchParams({ token });
-    const resp = await fetch(`/api/list?${q.toString()}`);
+    // The admin token travels in a header, never in the URL.
+    const resp = await fetch('/api/list', { headers: { 'x-admin-token': token } });
     const data = await resp.json();
     if (!resp.ok || !data.ok) throw new Error(data.error || '加载失败');
     adminState.items = data.items || [];
@@ -547,8 +549,8 @@ async function pollEntry(id, token, predicate) {
   for (let attempt = 0; attempt < 6; attempt++) {
     if (attempt > 0) await new Promise((r) => setTimeout(r, 500));
     try {
-      const q = new URLSearchParams({ id, token });
-      const resp = await fetch(`/api/entry?${q.toString()}`);
+      const q = new URLSearchParams({ id });
+      const resp = await fetch(`/api/entry?${q.toString()}`, { headers: { 'x-admin-token': token } });
       if (!resp.ok) continue;
       const entry = await resp.json();
       if (entry.ok && predicate(entry)) return entry;
@@ -594,8 +596,8 @@ document.addEventListener('click', async (event) => {
   if (action === 'backfill') {
     btn.disabled = true;
     try {
-      const q = new URLSearchParams({ id, token });
-      const resp = await fetch(`/api/entry?${q.toString()}`);
+      const q = new URLSearchParams({ id });
+      const resp = await fetch(`/api/entry?${q.toString()}`, { headers: { 'x-admin-token': token } });
       const data = await resp.json().catch(() => null);
       if (!resp.ok || !data?.ok) throw new Error((data && data.error) || '回填失败，请重试');
       if (!data.backfill) throw new Error('这条记录缺少可还原的数据，无法回填');

@@ -19,10 +19,12 @@ const env = {
   SUB_ACCESS_TOKEN: 'tok',
 };
 
+const adminReq = (path, token = 'tok') =>
+  new Request(`https://x.pages.dev${path}`, { headers: { 'x-admin-token': token } });
 const linkTokens = new Map(); // entry id -> its per-entry link token
 async function generate(body) {
   const r = await worker.fetch(new Request('https://x.pages.dev/api/generate', {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: 'tok', ...body }),
   }), env);
   const j = await r.json();
   assert.equal(j.ok, true, JSON.stringify(j));
@@ -100,9 +102,9 @@ console.log('worker tests passed');
   assert.equal(store.get(`note:搬瓦工 DC9:${g.shortId}`)?.value, g.shortId);
 
   // Admin auth
-  const badList = await worker.fetch(new Request('https://x.pages.dev/api/list?token=wrong'), env);
+  const badList = await worker.fetch(adminReq('/api/list', 'wrong'), env);
   assert.equal(badList.status, 403);
-  const listResp = await worker.fetch(new Request('https://x.pages.dev/api/list?token=tok'), env);
+  const listResp = await worker.fetch(adminReq('/api/list'), env);
   const list = await listResp.json();
   assert.equal(list.ok, true);
   const mine = list.items.find((i) => i.id === g.shortId);
@@ -162,7 +164,7 @@ console.log('worker tests passed');
   assert.equal(store.get(`sub:${timed.shortId}`).metadata.exp, timed.storage.expiresAt);
 
   // list surfaces the plan
-  const lr = await (await worker.fetch(new Request('https://x.pages.dev/api/list?token=tok'), env)).json();
+  const lr = await (await worker.fetch(adminReq('/api/list'), env)).json();
   const li = lr.items.find((i) => i.id === timed.shortId);
   assert.equal(li.storage.mode, 'days'); assert.equal(li.storage.days, 7); assert.equal(li.storage.expiresAt, timed.storage.expiresAt);
 
@@ -187,7 +189,7 @@ console.log('worker tests passed');
   // invalid days rejected
   const bad = await worker.fetch(new Request('https://x.pages.dev/api/generate', {
     method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ nodeLinks: nodeB, preferredIps: 'bestcf.top', storageMode: 'days', retentionDays: 0 }),
+    body: JSON.stringify({ token: 'tok', nodeLinks: nodeB, preferredIps: 'bestcf.top', storageMode: 'days', retentionDays: 0 }),
   }), env);
   assert.equal(bad.status, 400);
   console.log('retention: days/permanent switching, TTL values, note-save preservation, validation: all passed');
@@ -209,7 +211,7 @@ console.log('worker tests passed');
   assert.equal(store.get(dk).expirationTtl, 10 * 86400, 'dedup TTL updated to 10d');
   assert.equal(JSON.parse(store.get(`sub:${timed.shortId}`).value).note, '临时条目改名', 'note survives retention change');
   // list reflects the new plan
-  const lr2 = await (await worker.fetch(new Request('https://x.pages.dev/api/list?token=tok'), env)).json();
+  const lr2 = await (await worker.fetch(adminReq('/api/list'), env)).json();
   const listed1 = lr2.items.find((i) => i.id === timed.shortId);
   assert.equal(listed1.storage.mode, 'days');
   assert.equal(listed1.storage.days, 10);
@@ -226,13 +228,13 @@ console.log('worker tests passed');
   console.log('retention endpoint: plan switching, TTL sync, list reflection, validation: all passed');
 
   // --- GET /api/entry: direct read used by the UI's write verification ---
-  const er = await worker.fetch(new Request(`https://x.pages.dev/api/entry?id=${timed.shortId}&token=tok`), env);
+  const er = await worker.fetch(adminReq(`/api/entry?id=${timed.shortId}`), env);
   assert.equal(er.status, 200, 'entry read: status');
   const ej = await er.json();
   assert.equal(ej.note, '临时条目改名', 'entry read: note straight from the record');
   assert.equal(ej.storage.mode, 'permanent', 'entry read: storage straight from the record');
-  assert.equal((await worker.fetch(new Request('https://x.pages.dev/api/entry?id=nope999&token=tok'), env)).status, 404, 'entry read: unknown id 404');
-  assert.equal((await worker.fetch(new Request(`https://x.pages.dev/api/entry?id=${timed.shortId}&token=wrong`), env)).status, 403, 'entry read: wrong token 403');
+  assert.equal((await worker.fetch(adminReq('/api/entry?id=nope999'), env)).status, 404, 'entry read: unknown id 404');
+  assert.equal((await worker.fetch(adminReq(`/api/entry?id=${timed.shortId}`, 'wrong'), env)).status, 403, 'entry read: wrong token 403');
   console.log('entry endpoint: direct read, 404, 403: all passed');
 
   // --- Regression: list must follow the RECORD, not the (lagging) metadata ---
@@ -242,7 +244,7 @@ console.log('worker tests passed');
   const subKey = `sub:${timed.shortId}`;
   const freshMeta = store.get(subKey).metadata;
   store.get(subKey).metadata = { ...freshMeta, retention: 'permanent', exp: '' };
-  const lr3 = await (await worker.fetch(new Request('https://x.pages.dev/api/list?token=tok'), env)).json();
+  const lr3 = await (await worker.fetch(adminReq('/api/list'), env)).json();
   const listed3 = lr3.items.find((i) => i.id === timed.shortId);
   assert.equal(listed3.storage.mode, 'days', 'list shows the record plan despite stale metadata');
   assert.equal(listed3.storage.days, 3, 'list shows the record days despite stale metadata');
@@ -258,7 +260,7 @@ console.log('worker tests passed');
     metadata: { note: '幽灵条目', createdAt: '2026-10-28T00:00:00.000Z', sources: 'gone.example.com', out: 1, retention: 'permanent', exp: '' },
     expirationTtl: undefined,
   });
-  const lr4 = await (await worker.fetch(new Request('https://x.pages.dev/api/list?token=tok'), env)).json();
+  const lr4 = await (await worker.fetch(adminReq('/api/list'), env)).json();
   assert.ok(!lr4.items.some((i) => i.id === 'ghost000'), 'ghost key skipped in list');
   store.delete('sub:ghost000');
   console.log('ghost key regression: passed');
@@ -267,7 +269,7 @@ console.log('worker tests passed');
 // --- Form backfill suite: exact inputs for new entries, reconstruction for legacy ---
 {
   const getEntry = async (id) => {
-    const r = await worker.fetch(new Request(`https://x.pages.dev/api/entry?id=${id}&token=tok`), env);
+    const r = await worker.fetch(adminReq(`/api/entry?id=${id}`), env);
     return r.json();
   };
 
@@ -351,7 +353,7 @@ console.log('worker tests passed');
   assert.equal((await delResp.json()).ok, true);
   const keysAfter = [...store.keys()].filter((k) => k.includes(genD.shortId) || k === `dedup:${recD.dedupHash}`);
   assert.equal(keysAfter.length, 0, 'delete leaves no trace of the entry, inputs included');
-  const e5 = await worker.fetch(new Request(`https://x.pages.dev/api/entry?id=${genD.shortId}&token=tok`), env);
+  const e5 = await worker.fetch(adminReq(`/api/entry?id=${genD.shortId}`), env);
   assert.equal(e5.status, 404, 'deleted entry reads 404');
   console.log('backfill suite: exact, reconstruction, round-trips, null case, delete cleanup passed');
 }
@@ -386,7 +388,7 @@ console.log('worker tests passed');
   assert.equal((await getSub(jB.shortId, 'raw')).status, 200, 'entry B opens with its own link token');
 
   // A link token is worthless at the admin endpoints.
-  const listByLink = await worker.fetch(new Request(`https://x.pages.dev/api/list?token=${linkTokA}`), env);
+  const listByLink = await worker.fetch(new Request('https://x.pages.dev/api/list', { headers: { 'x-admin-token': linkTokA } }), env);
   assert.equal(listByLink.status, 403, 'link token must not list entries');
   const noteByLink = await worker.fetch(new Request('https://x.pages.dev/api/note', {
     method: 'POST', headers: { 'content-type': 'application/json' },
@@ -396,10 +398,10 @@ console.log('worker tests passed');
 
   // The admin-authenticated reads hand the frontend each entry's link
   // token, matching the token in the generated urls.
-  const lr = await (await worker.fetch(new Request('https://x.pages.dev/api/list?token=tok'), env)).json();
+  const lr = await (await worker.fetch(adminReq('/api/list'), env)).json();
   const itemA = lr.items.find((i) => i.id === j1.shortId);
   assert.equal(itemA.linkToken, linkTokA, 'list item carries the same link token');
-  const er = await (await worker.fetch(new Request(`https://x.pages.dev/api/entry?id=${j1.shortId}&token=tok`), env)).json();
+  const er = await (await worker.fetch(adminReq(`/api/entry?id=${j1.shortId}`), env)).json();
   assert.equal(er.linkToken, linkTokA, 'entry read carries the same link token');
 
   // Surge output embeds the per-entry link token, never the admin token.
@@ -408,4 +410,78 @@ console.log('worker tests passed');
   assert.ok(surge.body.includes(`?token=${linkTokA}`), 'surge profile carries the link token');
   assert.ok(!surge.body.includes('token=tok'), 'surge profile must not contain the admin token');
   console.log('link token suite: per-entry tokens, admin token rejected at /sub, link token rejected at admin: passed');
+}
+
+// --- Audit-fix suite (2026-10-28): parse tolerance, Surge injection,
+//     pointer TTL, port range, prefix cap, generate auth, UA auto ---
+{
+  // Generate requires the admin token once one is configured.
+  const noTok = await worker.fetch(new Request('https://x.pages.dev/api/generate', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ nodeLinks: node, preferredIps: '1.2.3.4' }),
+  }), env);
+  assert.equal(noTok.status, 403, 'generate without token 403');
+  const wrongTok = await worker.fetch(new Request('https://x.pages.dev/api/generate', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ token: 'nope', nodeLinks: node, preferredIps: '1.2.3.4' }),
+  }), env);
+  assert.equal(wrongTok.status, 403, 'generate with wrong token 403');
+
+  // One bad line no longer kills the batch; it is skipped and reported.
+  const mixed = await generate({
+    nodeLinks: node + '\nvmess://!!!broken!!!\nvless://not a url',
+    preferredIps: '10.9.9.9',
+  });
+  assert.equal(mixed.counts.inputNodes, 1, 'only the valid node survives');
+  assert.ok(mixed.warnings.some((w) => w.includes('已跳过')), 'skipped lines are reported in warnings');
+
+  // Surge injection: a newline in a node name must not create config lines.
+  const evil = 'trojan://pw@edge.example.com:443?security=tls#innocent%0AInjected%20%3D%20trojan%2C%20attacker.example.com%2C%20443%2C%20password%3Dpw2';
+  const ej = await generate({ nodeLinks: evil, preferredIps: '10.9.9.8' });
+  const eSub = await getSub(ej.shortId, 'surge');
+  assert.equal(eSub.status, 200);
+  assert.ok(!eSub.body.split('\n').some((l) => l.startsWith('Injected')), 'no injected Surge line');
+  assert.ok(!eSub.body.includes('attacker.example.com, 443, password=pw2\n'), 'injected payload not present as a line');
+
+  // The note pointer key shares the record's TTL, across retention edits.
+  const timed = await generate({ nodeLinks: node, preferredIps: '10.9.9.7', note: 'ttl-note', storageMode: 'days', retentionDays: 3 });
+  const ptrKey = `note:ttl-note:${timed.shortId}`;
+  assert.equal(store.get(ptrKey)?.expirationTtl, 259200, 'pointer carries the same TTL as the record');
+  const ret = (payload) => worker.fetch(new Request('https://x.pages.dev/api/retention', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ token: 'tok', ...payload }),
+  }), env);
+  await ret({ id: timed.shortId, mode: 'permanent' });
+  assert.equal(store.get(ptrKey)?.expirationTtl, undefined, 'pointer TTL cleared with permanent');
+  await ret({ id: timed.shortId, mode: 'days', days: 9 });
+  assert.equal(store.get(ptrKey)?.expirationTtl, 777600, 'pointer TTL follows retention changes');
+
+  // Out-of-range preferred port is a clear 400, not a generated dud.
+  const badPort = await worker.fetch(new Request('https://x.pages.dev/api/generate', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ token: 'tok', nodeLinks: node, preferredIps: '1.2.3.4:99999' }),
+  }), env);
+  assert.equal(badPort.status, 400, 'port 99999 rejected');
+
+  // The name prefix is capped before hashing: prefixes that differ only
+  // past the cap produce the SAME entry, and names stay bounded.
+  const capA = await generate({ nodeLinks: node, preferredIps: '10.9.9.6', namePrefix: 'A'.repeat(100) + 'X'.repeat(60) });
+  const capB = await generate({ nodeLinks: node, preferredIps: '10.9.9.6', namePrefix: 'A'.repeat(100) + 'Y'.repeat(60) });
+  assert.equal(capA.shortId, capB.shortId, 'prefix capped before dedup hash');
+  assert.ok(capA.preview[0].name.length < 160, 'node names stay bounded');
+
+  // "Auto" adapts to the client: Clash UA -> YAML, Surge UA -> profile,
+  // anything else -> the historical base64 raw.
+  const linkTok = linkTokens.get(j1.shortId);
+  const fetchAuto = (ua) => worker.fetch(new Request(`https://x.pages.dev/sub/${j1.shortId}?token=${linkTok}`, {
+    headers: { 'user-agent': ua },
+  }), env);
+  const clashAuto = await (await fetchAuto('ClashforWindows/0.20.39')).text();
+  assert.ok(clashAuto.startsWith('mixed-port:'), 'clash UA gets clash yaml');
+  const surgeAuto = await (await fetchAuto('Surge/5.10.0')).text();
+  assert.ok(surgeAuto.includes('[Proxy]'), 'surge UA gets surge profile');
+  const plainAuto = await (await fetchAuto('Mozilla/5.0')).text();
+  assert.equal(Buffer.from(plainAuto, 'base64').toString('utf8'), j1.plainText, 'unknown UA keeps base64 raw');
+
+  console.log('audit-fix suite: generate auth, parse tolerance, surge injection, pointer TTL, port range, prefix cap, UA auto: passed');
 }

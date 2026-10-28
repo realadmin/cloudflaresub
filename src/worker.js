@@ -15,7 +15,7 @@ function json(data, status = 200) {
       'content-type': 'application/json; charset=utf-8',
       'access-control-allow-origin': '*',
       'access-control-allow-methods': 'GET,POST,OPTIONS',
-      'access-control-allow-headers': 'content-type',
+      'access-control-allow-headers': 'content-type, x-admin-token',
     },
   });
 }
@@ -92,7 +92,8 @@ function parsePreferredEndpoints(input) {
       const value = (hashIdx >= 0 ? line.slice(0, hashIdx) : line).trim();
       const remark = (hashIdx >= 0 ? line.slice(hashIdx + 1) : '').trim();
       const { server, port } = splitHostAndPort(value);
-      return { server, port, remark };
+      const badPort = port !== undefined && (!Number.isInteger(port) || port < 1 || port > 65535);
+      return { server, port, remark, badPort };
     });
 }
 
@@ -143,28 +144,36 @@ function parseRawLinks(input) {
     .map((line) => line.trim())
     .filter(Boolean);
 
-  const result = [];
+  // Per-line fault tolerance: one corrupted or half-copied link must not
+  // fail the whole batch. Unparsable lines are counted and reported back
+  // as skipped instead of throwing the entire generate away.
+  const nodes = [];
+  let skipped = 0;
   for (const line of lines) {
-    if (line.startsWith('vmess://')) {
-      result.push(parseVmess(line));
-      continue;
-    }
-    if (line.startsWith('vless://')) {
-      result.push(parseUrlLike(line, 'vless'));
-      continue;
-    }
-    if (line.startsWith('trojan://')) {
-      result.push(parseUrlLike(line, 'trojan'));
-      continue;
-    }
     try {
+      if (line.startsWith('vmess://')) {
+        nodes.push(parseVmess(line));
+        continue;
+      }
+      if (line.startsWith('vless://')) {
+        nodes.push(parseUrlLike(line, 'vless'));
+        continue;
+      }
+      if (line.startsWith('trojan://')) {
+        nodes.push(parseUrlLike(line, 'trojan'));
+        continue;
+      }
       const decoded = b64DecodeUtf8(line);
       if (/^(vmess|vless|trojan):\/\//m.test(decoded)) {
-        result.push(...parseRawLinks(decoded));
+        const inner = parseRawLinks(decoded);
+        nodes.push(...inner.nodes);
+        skipped += inner.skipped;
       }
-    } catch {}
+    } catch {
+      skipped += 1;
+    }
   }
-  return result;
+  return { nodes, skipped };
 }
 
 function buildNodes(baseNodes, preferredEndpoints, options = {}) {
@@ -181,7 +190,10 @@ function buildNodes(baseNodes, preferredEndpoints, options = {}) {
       else nameParts.push(String(counter));
       output.push({
         ...node,
-        name: nameParts.join(' | '),
+        // Names land in line-based config formats (Surge, Clash): a raw
+        // newline smuggled in via a link's #fragment could otherwise
+        // inject whole config lines into the exported profile.
+        name: nameParts.join(' | ').replace(/[\r\n]+/g, ' '),
         server: ep.server,
         port: ep.port || node.port,
         host: options.keepOriginalHost ? node.host : '',
@@ -399,14 +411,23 @@ function renderClash(nodes) {
   ].join('\n');
 }
 
+function surgeName(name) {
+  // Surge proxy definitions and its comma-separated group list cannot
+  // carry raw commas or newlines in a proxy name (a crafted name could
+  // otherwise inject config lines or phantom group members). Applied to
+  // stored nodes too, so entries created before name sanitizing existed
+  // are still safe to export.
+  return String(name || '').replace(/[\r\n,]+/g, ' ').trim();
+}
+
 function renderSurge(nodes, baseUrl, linkToken) {
   const proxies = nodes
     .filter((node) => node.type === 'vmess' || node.type === 'trojan')
     .map((node) => {
       if (node.type === 'vmess') {
-        return `${node.name} = vmess, ${node.server}, ${node.port}, username=${node.uuid}, ws=true, ws-path=${node.path || '/'}, ws-headers=Host:${node.host || ''}, tls=${node.tls ? 'true' : 'false'}, sni=${node.sni || ''}`;
+        return `${surgeName(node.name)} = vmess, ${node.server}, ${node.port}, username=${node.uuid}, ws=true, ws-path=${node.path || '/'}, ws-headers=Host:${node.host || ''}, tls=${node.tls ? 'true' : 'false'}, sni=${node.sni || ''}`;
       }
-      return `${node.name} = trojan, ${node.server}, ${node.port}, password=${node.password || ''}, sni=${node.sni || ''}`;
+      return `${surgeName(node.name)} = trojan, ${node.server}, ${node.port}, password=${node.password || ''}, sni=${node.sni || ''}`;
     });
 
   return [
@@ -420,7 +441,7 @@ function renderSurge(nodes, baseUrl, linkToken) {
     'Proxy = select, ' +
       nodes
         .filter((n) => n.type === 'vmess' || n.type === 'trojan')
-        .map((n) => n.name)
+        .map((n) => surgeName(n.name))
         .join(', '),
     '',
     '[Rule]',
@@ -552,7 +573,11 @@ async function putRecord(env, id, record, prevNote = undefined, ttlSeconds = und
     await env.SUB_STORE.delete(notePointerKey(prevNote, id));
   }
   if (record.note) {
-    await env.SUB_STORE.put(notePointerKey(record.note, id), id);
+    // The pointer shares the record's lifetime: writing it without the
+    // TTL used to leave orphan note keys behind after timed entries
+    // expired on their own.
+    const pointerOpts = ttlSeconds ? { expirationTtl: ttlSeconds } : {};
+    await env.SUB_STORE.put(notePointerKey(record.note, id), id, pointerOpts);
   }
 }
 
@@ -567,8 +592,32 @@ async function handleGenerate(request, env, url) {
     return json({ ok: false, error: '请求体不是合法 JSON' }, 400);
   }
 
-  const baseNodes = parseRawLinks(body.nodeLinks || '');
+  // Generating writes to KV, so once an admin token exists it is required
+  // here too — otherwise anyone who finds the page could fill the store
+  // and burn the KV write quota. The page sends the same token the owner
+  // already keeps in the admin section's token box.
+  if (env.SUB_ACCESS_TOKEN) {
+    const denied = await checkAdmin(request, env, url, body);
+    if (denied) {
+      return json({ ok: false, error: '生成订阅需要管理令牌：请先在页面下方「KV 条目管理」处填入 SUB_ACCESS_TOKEN（生成与管理共用同一个令牌）' }, 403);
+    }
+  }
+  // Cap the name prefix before it reaches the dedup hash and every node
+  // name, so an oversized prefix cannot bloat records or outputs.
+  body.namePrefix = String(body.namePrefix || '').trim().slice(0, 100);
+
+  const parsed = parseRawLinks(body.nodeLinks || '');
   const preferredEndpoints = parsePreferredEndpoints(body.preferredIps || '');
+
+  if (preferredEndpoints.some((ep) => ep.badPort)) {
+    return json({ ok: false, error: '优选地址的端口需要在 1 到 65535 之间' }, 400);
+  }
+  // Nodes whose own port is unusable (e.g. a hand-written vmess JSON
+  // carrying port 99999) are dropped like unparsable lines.
+  const baseNodes = parsed.nodes.filter(
+    (n) => Number.isInteger(n.port) && n.port >= 1 && n.port <= 65535,
+  );
+  const skippedLines = parsed.skipped + (parsed.nodes.length - baseNodes.length);
 
   if (!baseNodes.length) return json({ ok: false, error: '没有识别到可用节点' }, 400);
   if (!preferredEndpoints.length) return json({ ok: false, error: '没有识别到可用优选地址' }, 400);
@@ -700,21 +749,40 @@ async function handleGenerate(request, env, url) {
       host: node.host || '',
       sni: node.sni || '',
     })),
-    warnings: accessToken ? [] : ['未检测到 SUB_ACCESS_TOKEN，订阅链接将没有第二层访问保护。'],
+    warnings: [
+      ...(accessToken ? [] : ['未检测到 SUB_ACCESS_TOKEN，订阅链接将没有第二层访问保护。']),
+      ...(skippedLines > 0 ? [`有 ${skippedLines} 行节点链接无法解析或端口不可用，已跳过。`] : []),
+    ],
   });
 }
 
-function checkAdmin(request, env, url, body) {
+// Constant-time string comparison (via digests, so neither content nor
+// length leaks through timing).
+async function safeEqual(a, b) {
+  const enc = new TextEncoder();
+  const [da, db] = await Promise.all([
+    crypto.subtle.digest('SHA-256', enc.encode(String(a || ''))),
+    crypto.subtle.digest('SHA-256', enc.encode(String(b || ''))),
+  ]);
+  const va = new Uint8Array(da);
+  const vb = new Uint8Array(db);
+  let diff = 0;
+  for (let i = 0; i < va.length; i++) diff |= va[i] ^ vb[i];
+  return diff === 0;
+}
+
+async function checkAdmin(request, env, url, body) {
   const expected = env.SUB_ACCESS_TOKEN;
   if (!expected) {
     return json({ ok: false, error: '未设置 SUB_ACCESS_TOKEN，出于安全原因管理接口已禁用，请先在 Pages 项目里设置该 Secret' }, 403);
   }
+  // Body field or the dedicated header only — never the URL query, so the
+  // admin token stays out of browser history, proxy logs and referrers.
   const provided =
     (body && typeof body.token === 'string' && body.token) ||
-    url.searchParams.get('token') ||
     request.headers.get('x-admin-token') ||
     '';
-  if (provided !== expected) {
+  if (!(await safeEqual(provided, expected))) {
     return json({ ok: false, error: '管理令牌不正确' }, 403);
   }
   return null;
@@ -722,7 +790,7 @@ function checkAdmin(request, env, url, body) {
 
 async function handleList(request, env, url) {
   if (!env.SUB_STORE) return json({ ok: false, error: 'SUB_STORE KV 未绑定' }, 500);
-  const denied = checkAdmin(request, env, url, null);
+  const denied = await checkAdmin(request, env, url, null);
   if (denied) return denied;
 
   // The key list only tells us WHICH entries exist. Every displayed field
@@ -857,7 +925,7 @@ function buildBackfill(record) {
 // write promptly.
 async function handleEntry(request, env, url) {
   if (!env.SUB_STORE) return json({ ok: false, error: 'SUB_STORE KV 未绑定' }, 500);
-  const denied = checkAdmin(request, env, url, null);
+  const denied = await checkAdmin(request, env, url, null);
   if (denied) return denied;
   const id = String(url.searchParams.get('id') || '').trim();
   if (!id) return json({ ok: false, error: '缺少条目 id' }, 400);
@@ -880,7 +948,7 @@ async function handleNote(request, env) {
   if (!env.SUB_STORE) return json({ ok: false, error: 'SUB_STORE KV 未绑定' }, 500);
   let body;
   try { body = await request.json(); } catch { return json({ ok: false, error: '请求体不是合法 JSON' }, 400); }
-  const denied = checkAdmin(request, env, new URL(request.url), body);
+  const denied = await checkAdmin(request, env, new URL(request.url), body);
   if (denied) return denied;
 
   const id = String(body.id || '').trim();
@@ -903,7 +971,7 @@ async function handleRetention(request, env) {
   if (!env.SUB_STORE) return json({ ok: false, error: 'SUB_STORE KV 未绑定' }, 500);
   let body;
   try { body = await request.json(); } catch { return json({ ok: false, error: '请求体不是合法 JSON' }, 400); }
-  const denied = checkAdmin(request, env, new URL(request.url), body);
+  const denied = await checkAdmin(request, env, new URL(request.url), body);
   if (denied) return denied;
 
   const id = String(body.id || '').trim();
@@ -931,7 +999,7 @@ async function handleDelete(request, env) {
   if (!env.SUB_STORE) return json({ ok: false, error: 'SUB_STORE KV 未绑定' }, 500);
   let body;
   try { body = await request.json(); } catch { return json({ ok: false, error: '请求体不是合法 JSON' }, 400); }
-  const denied = checkAdmin(request, env, new URL(request.url), body);
+  const denied = await checkAdmin(request, env, new URL(request.url), body);
   if (denied) return denied;
 
   const id = String(body.id || '').trim();
@@ -980,13 +1048,13 @@ async function validateLinkToken(url, env, id) {
   if (!env.SUB_ACCESS_TOKEN) return { ok: true };
   const provided = url.searchParams.get('token') || '';
   const expected = await linkTokenFor(id, env);
-  if (!provided || provided !== expected) {
+  if (!provided || !(await safeEqual(provided, expected))) {
     return { ok: false, response: text('Forbidden: invalid token', 403) };
   }
   return { ok: true };
 }
 
-async function handleSub(url, env) {
+async function handleSub(request, env, url) {
   if (!env.SUB_STORE) {
     return text('Server error: SUB_STORE KV binding is missing. Add it in Pages Settings -> Bindings, then redeploy.', 500);
   }
@@ -1001,7 +1069,17 @@ async function handleSub(url, env) {
 
   const record = JSON.parse(raw);
   const nodes = record.nodes || [];
-  const target = (url.searchParams.get('target') || 'raw').toLowerCase();
+  let target = (url.searchParams.get('target') || '').toLowerCase();
+  if (!target || target === 'auto') {
+    // "Auto" really is adaptive: clients identifying themselves as
+    // Clash/Mihomo or Surge get their native format; everything else
+    // keeps the historical default (base64 raw), so unknown clients see
+    // no behaviour change.
+    const ua = (request.headers.get('user-agent') || '').toLowerCase();
+    if (/clash|mihomo|stash/.test(ua)) target = 'clash';
+    else if (/surge/.test(ua)) target = 'surge';
+    else target = 'raw';
+  }
 
   if (target === 'plain' || target === 'links' || target === 'text') {
     return text(renderPlain(nodes), 200, 'text/plain; charset=utf-8');
@@ -1029,7 +1107,7 @@ export default {
           headers: {
             'access-control-allow-origin': '*',
             'access-control-allow-methods': 'GET,POST,OPTIONS',
-            'access-control-allow-headers': 'content-type',
+            'access-control-allow-headers': 'content-type, x-admin-token',
           },
         });
       }
@@ -1059,7 +1137,7 @@ export default {
       }
 
       if (request.method === 'GET' && url.pathname.startsWith('/sub/')) {
-        return await handleSub(url, env);
+        return await handleSub(request, env, url);
       }
 
       // Pages (advanced mode) always provides the ASSETS binding.
@@ -1070,8 +1148,11 @@ export default {
       }
       return text('Not found. Static assets are not available: deploy as a Cloudflare Pages project with build output directory "public" (see README).', 404);
     } catch (err) {
-      // Never let an uncaught exception bubble up as a bare 1101 page.
-      return json({ ok: false, error: 'Internal error: ' + (err && err.message ? err.message : String(err)) }, 500);
+      // Never let an uncaught exception bubble up as a bare 1101 page,
+      // and never leak internal error details to the caller: the real
+      // error goes to the server log only.
+      console.error(err);
+      return json({ ok: false, error: 'Internal error' }, 500);
     }
   },
 };
