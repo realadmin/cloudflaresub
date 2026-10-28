@@ -28,6 +28,58 @@ const demoIps = [
   '104.18.3.4:2053#US-Edge'
 ].join('\n');
 
+// ---------------- Preferred-IP source mode (manual / API dynamic) --------
+const ipModeSelect = document.getElementById('ipMode');
+const manualIpPanel = document.getElementById('manualIpPanel');
+const apiIpPanel = document.getElementById('apiIpPanel');
+const ipSourceUrlInput = document.getElementById('ipSourceUrl');
+const ipSourceLimitInput = document.getElementById('ipSourceLimit');
+const ipSourceMsg = document.getElementById('ipSourceMsg');
+const testIpSourceBtn = document.getElementById('testIpSourceBtn');
+
+function syncIpMode() {
+  const api = !!(ipModeSelect && ipModeSelect.value === 'api');
+  if (manualIpPanel) manualIpPanel.classList.toggle('hidden', api);
+  if (apiIpPanel) apiIpPanel.classList.toggle('hidden', !api);
+  const ta = document.getElementById('preferredIps');
+  if (ta) ta.required = !api;
+  if (ipSourceUrlInput) ipSourceUrlInput.required = api;
+}
+if (ipModeSelect) {
+  ipModeSelect.addEventListener('change', syncIpMode);
+  syncIpMode();
+}
+if (testIpSourceBtn) {
+  testIpSourceBtn.addEventListener('click', async () => {
+    const url = (ipSourceUrlInput?.value || '').trim();
+    const token = adminToken();
+    if (!url) {
+      ipSourceMsg.textContent = '请先填写来源地址。';
+      return;
+    }
+    if (!token) {
+      ipSourceMsg.textContent = '请先在页面下方「KV 条目管理」处填入管理令牌，再测试拉取。';
+      return;
+    }
+    testIpSourceBtn.disabled = true;
+    ipSourceMsg.textContent = '正在拉取…';
+    try {
+      const resp = await fetch('/api/ip-source-test', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ url, token }),
+      });
+      const data = await resp.json().catch(() => null);
+      if (!resp.ok || !data?.ok) throw new Error((data && data.error) || '拉取失败');
+      ipSourceMsg.textContent = `拉取成功：共解析到 ${data.count} 个可用优选地址。前几个：${(data.sample || []).join('、')}`;
+    } catch (e) {
+      ipSourceMsg.textContent = `拉取失败：${e.message || e}`;
+    } finally {
+      testIpSourceBtn.disabled = false;
+    }
+  });
+}
+
 const storageModeSelect = document.getElementById('storageMode');
 const retentionDaysInput = document.getElementById('retentionDays');
 if (storageModeSelect && retentionDaysInput) {
@@ -37,6 +89,10 @@ if (storageModeSelect && retentionDaysInput) {
 }
 
 fillDemoBtn.addEventListener('click', () => {
+  if (ipModeSelect) {
+    ipModeSelect.value = 'manual';
+    ipModeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+  }
   document.getElementById('nodeLinks').value = demoVmess;
   document.getElementById('preferredIps').value = demoIps;
   document.getElementById('namePrefix').value = 'CF';
@@ -51,6 +107,9 @@ form.addEventListener('submit', async (event) => {
   const payload = {
     nodeLinks: document.getElementById('nodeLinks').value,
     preferredIps: document.getElementById('preferredIps').value,
+    ipMode: ipModeSelect?.value || 'manual',
+    sourceUrl: ipSourceUrlInput?.value || '',
+    sourceLimit: Number(ipSourceLimitInput?.value || 10),
     namePrefix: document.getElementById('namePrefix').value,
     keepOriginalHost: document.getElementById('keepOriginalHost').checked,
     // Generating writes to KV, so it carries the same admin token the
@@ -350,7 +409,7 @@ function renderAdminList() {
           <div class="cell"><textarea class="note-input" maxlength="80" rows="4" placeholder="（未填备注）">${escapeHtml(item.note || '')}</textarea></div>
           <div class="cell">${escapeHtml(created)}</div>
           <div class="cell">${retention}</div>
-          <div class="cell">${escapeHtml((item.sources || []).join(', ') || '-')}</div>
+          <div class="cell">${escapeHtml((item.sources || []).join(', ') || '-')}${item.dynamic ? '<br><span class="hint">动态订阅 · 跟随来源更新</span>' : ''}</div>
           <div class="cell">${item.outputNodes ?? '-'}</div>
           <div class="cell">
             <div class="admin-actions">
@@ -575,6 +634,12 @@ function fillGenerateForm(bf) {
   };
   setValue('nodeLinks', bf.nodeLinks);
   setValue('preferredIps', bf.preferredIps);
+  if (ipModeSelect) {
+    ipModeSelect.value = bf.ipMode === 'api' ? 'api' : 'manual';
+    ipModeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  setValue('ipSourceUrl', bf.sourceUrl);
+  if (bf.sourceLimit) setValue('ipSourceLimit', bf.sourceLimit);
   setValue('namePrefix', bf.namePrefix);
   const keep = document.getElementById('keepOriginalHost');
   if (keep) keep.checked = bf.keepOriginalHost !== false;

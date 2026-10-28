@@ -97,6 +97,188 @@ function parsePreferredEndpoints(input) {
     });
 }
 
+// ---- Preferred-IP API sources (dynamic subscriptions) --------------------
+// A dynamic entry follows an external preferred-IP list (typically a
+// public CloudflareSpeedTest-style publication) instead of a fixed
+// snapshot: /sub responses are rebuilt from the source's latest list.
+// The list is cached in KV for an hour; a failed refresh falls back to
+// the stale cache, and ultimately to the snapshot stored on the entry,
+// so a dead source never takes existing subscriptions down with it.
+const IP_SOURCE_FRESH_MS = 60 * 60 * 1000;
+const IP_SOURCE_RETRY_MS = 5 * 60 * 1000;
+const IP_SOURCE_MAX_BYTES = 512 * 1024;
+const IP_SOURCE_CACHE_CAP = 500;
+
+function assertSourceUrl(raw) {
+  let u;
+  try {
+    u = new URL(String(raw || '').trim());
+  } catch {
+    throw new Error('来源地址不是合法 URL');
+  }
+  if (u.protocol !== 'https:') throw new Error('来源地址必须以 https:// 开头');
+  const host = u.hostname.toLowerCase();
+  if (host === 'localhost' || host.endsWith('.local') || host.endsWith('.internal')) {
+    throw new Error('来源地址不允许指向内网主机');
+  }
+  const bare = host.replace(/^\[|\]$/g, '');
+  if (
+    /^(10\.|127\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|0\.)/.test(bare) ||
+    bare === '::1' ||
+    /^(fc|fd|fe80)/.test(bare)
+  ) {
+    throw new Error('来源地址不允许指向内网 IP');
+  }
+  return u.toString();
+}
+
+function extractEndpointTokens(text) {
+  // One candidate endpoint per line, however the source formats it:
+  // plain txt (one IP per line), CSV speed-test results (endpoint in the
+  // first cell), or stray text around the addresses. A speed-test CSV's
+  // separate port column is not picked up — endpoints fall back to the
+  // node's own port, which is the common case for these lists.
+  const tokens = [];
+  const re = /\[([0-9a-fA-F:]+)\](?::(\d{1,5}))?|(\d{1,3}(?:\.\d{1,3}){3})(?::(\d{1,5}))?|\b((?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,})(?::(\d{1,5}))?/;
+  for (const line of String(text).split(/\r?\n/)) {
+    const m = line.match(re);
+    if (!m) continue;
+    if (m[1]) tokens.push(m[2] ? `[${m[1]}]:${m[2]}` : m[1]);
+    else if (m[3]) tokens.push(m[4] ? `${m[3]}:${m[4]}` : m[3]);
+    else if (m[5]) tokens.push(m[6] ? `${m[5]}:${m[6]}` : m[5]);
+  }
+  return tokens;
+}
+
+function jsonCandidateStrings(text) {
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  const strings = [];
+  const walk = (v, depth) => {
+    if (depth > 6 || strings.length > 5000) return;
+    if (typeof v === 'string') {
+      strings.push(v);
+      return;
+    }
+    if (Array.isArray(v)) {
+      v.forEach((x) => walk(x, depth + 1));
+      return;
+    }
+    if (v && typeof v === 'object') {
+      const preferred = v.ip ?? v.address ?? v.host ?? v.endpoint;
+      if (typeof preferred === 'string') {
+        strings.push(Number.isInteger(v.port) ? `${preferred}:${v.port}` : preferred);
+      }
+      Object.values(v).forEach((x) => walk(x, depth + 1));
+    }
+  };
+  walk(data, 0);
+  return strings;
+}
+
+async function fetchIpSource(rawUrl) {
+  const url = assertSourceUrl(rawUrl);
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 5000);
+  let text;
+  try {
+    const resp = await fetch(url, {
+      signal: ctrl.signal,
+      redirect: 'follow',
+      headers: { 'user-agent': 'cloudflaresub (preferred-ip source)', accept: 'text/plain, application/json, */*' },
+    });
+    if (!resp.ok) throw new Error(`来源返回 HTTP ${resp.status}`);
+    text = await resp.text();
+  } catch (e) {
+    if (e && e.name === 'AbortError') throw new Error('来源拉取超时（5 秒）');
+    throw e instanceof Error ? e : new Error('来源拉取失败');
+  } finally {
+    clearTimeout(timer);
+  }
+  if (text.length > IP_SOURCE_MAX_BYTES) throw new Error('来源内容过大（超过 512KB）');
+  const jsonStrings = jsonCandidateStrings(text);
+  const candidates = jsonStrings
+    ? jsonStrings.flatMap((s) => extractEndpointTokens(s))
+    : extractEndpointTokens(text);
+  const parsed = parsePreferredEndpoints(candidates.join('\n'));
+  const seen = new Set();
+  const endpoints = [];
+  for (const ep of parsed) {
+    if (ep.badPort || !ep.server) continue;
+    const key = `${ep.server}:${ep.port ?? ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    endpoints.push({ server: ep.server, port: ep.port, remark: ep.remark || '' });
+    if (endpoints.length >= IP_SOURCE_CACHE_CAP) break;
+  }
+  return { url, candidates: candidates.length, endpoints };
+}
+
+async function readIpCache(env, url) {
+  const raw = await env.SUB_STORE.get(`ipcache:${await sha256Hex(url)}`);
+  if (!raw) return null;
+  try {
+    const c = JSON.parse(raw);
+    return c && Array.isArray(c.endpoints) ? c : null;
+  } catch {
+    return null;
+  }
+}
+
+async function writeIpCache(env, url, cache) {
+  await env.SUB_STORE.put(`ipcache:${await sha256Hex(url)}`, JSON.stringify(cache));
+}
+
+// Endpoints for a source URL, preferring a fresh KV cache, then a live
+// fetch, then the stale cache. Throws only when there is nothing usable
+// at all (no cache and the fetch failed / returned nothing).
+async function getSourceEndpoints(env, rawUrl, now = Date.now()) {
+  const url = assertSourceUrl(rawUrl);
+  const cached = await readIpCache(env, url);
+  if (cached && now - (cached.fetchedAt || 0) < IP_SOURCE_FRESH_MS) {
+    return { endpoints: cached.endpoints, fromCache: true, fetchedAt: cached.fetchedAt };
+  }
+  if (cached && now - (cached.lastAttempt || 0) < IP_SOURCE_RETRY_MS) {
+    return { endpoints: cached.endpoints, fromCache: true, fetchedAt: cached.fetchedAt };
+  }
+  try {
+    const fresh = await fetchIpSource(url);
+    if (!fresh.endpoints.length) throw new Error('来源没有返回可用的优选地址');
+    await writeIpCache(env, url, { url, fetchedAt: now, lastAttempt: now, endpoints: fresh.endpoints });
+    return { endpoints: fresh.endpoints, fromCache: false, fetchedAt: now, candidates: fresh.candidates };
+  } catch (e) {
+    if (cached) {
+      await writeIpCache(env, url, { ...cached, lastAttempt: now });
+      return { endpoints: cached.endpoints, fromCache: true, fetchedAt: cached.fetchedAt, refreshError: e.message };
+    }
+    throw e;
+  }
+}
+
+// The endpoints a dynamic entry should serve right now: the source's
+// latest list (via cache), or the entry's generation-time snapshot when
+// the source has never been reachable since.
+async function resolveDynamicEndpoints(env, record) {
+  const dyn = record.dynamic;
+  const limit = dyn.limit || 10;
+  try {
+    const { endpoints } = await getSourceEndpoints(env, dyn.sourceUrl);
+    const sliced = endpoints.slice(0, limit);
+    if (sliced.length) return sliced;
+  } catch {}
+  const snapshot = Array.isArray(dyn.endpoints) ? dyn.endpoints.slice(0, limit) : [];
+  return snapshot.length ? snapshot : null;
+}
+
+function parseSourceLimit(value) {
+  const n = Number(value);
+  return Number.isInteger(n) ? Math.min(100, Math.max(1, n)) : 10;
+}
+
 function parseVmess(link) {
   const raw = link.slice('vmess://'.length).trim();
   const obj = JSON.parse(b64DecodeUtf8(raw));
@@ -607,20 +789,46 @@ async function handleGenerate(request, env, url) {
   body.namePrefix = String(body.namePrefix || '').trim().slice(0, 100);
 
   const parsed = parseRawLinks(body.nodeLinks || '');
-  const preferredEndpoints = parsePreferredEndpoints(body.preferredIps || '');
-
-  if (preferredEndpoints.some((ep) => ep.badPort)) {
-    return json({ ok: false, error: '优选地址的端口需要在 1 到 65535 之间' }, 400);
-  }
   // Nodes whose own port is unusable (e.g. a hand-written vmess JSON
   // carrying port 99999) are dropped like unparsable lines.
   const baseNodes = parsed.nodes.filter(
     (n) => Number.isInteger(n.port) && n.port >= 1 && n.port <= 65535,
   );
   const skippedLines = parsed.skipped + (parsed.nodes.length - baseNodes.length);
-
   if (!baseNodes.length) return json({ ok: false, error: '没有识别到可用节点' }, 400);
-  if (!preferredEndpoints.length) return json({ ok: false, error: '没有识别到可用优选地址' }, 400);
+
+  // Preferred endpoints come either from the pasted list (a fixed
+  // snapshot) or from an API source the entry will keep following
+  // (a dynamic subscription).
+  let preferredEndpoints;
+  let dynamic = null;
+  let sourceInfo = null;
+  if (body.ipMode === 'api') {
+    const limit = parseSourceLimit(body.sourceLimit);
+    let source;
+    try {
+      source = await getSourceEndpoints(env, String(body.sourceUrl || ''));
+    } catch (e) {
+      return json({ ok: false, error: `优选 IP 来源拉取失败：${e.message || e}` }, 400);
+    }
+    preferredEndpoints = source.endpoints.slice(0, limit);
+    if (!preferredEndpoints.length) {
+      return json({ ok: false, error: '优选 IP 来源没有返回可用的优选地址' }, 400);
+    }
+    dynamic = {
+      sourceUrl: String(body.sourceUrl || '').trim(),
+      limit,
+      endpoints: preferredEndpoints,
+      snapshotAt: new Date().toISOString(),
+    };
+    sourceInfo = { total: source.endpoints.length, fromCache: !!source.fromCache };
+  } else {
+    preferredEndpoints = parsePreferredEndpoints(body.preferredIps || '');
+    if (preferredEndpoints.some((ep) => ep.badPort)) {
+      return json({ ok: false, error: '优选地址的端口需要在 1 到 65535 之间' }, 400);
+    }
+    if (!preferredEndpoints.length) return json({ ok: false, error: '没有识别到可用优选地址' }, 400);
+  }
 
   const options = {
     namePrefix: body.namePrefix || '',
@@ -643,12 +851,20 @@ async function handleGenerate(request, env, url) {
   // field existed are reconstructed from their stored nodes instead.
   const inputs = {
     nodeLinks: String(body.nodeLinks || '').slice(0, 100000),
-    preferredIps: String(body.preferredIps || '').slice(0, 50000),
+    preferredIps: dynamic ? '' : String(body.preferredIps || '').slice(0, 50000),
+    ipMode: dynamic ? 'api' : 'manual',
+    sourceUrl: dynamic ? dynamic.sourceUrl : '',
+    sourceLimit: dynamic ? dynamic.limit : 10,
   };
   const retention = parseRetention(body);
   if (retention.error) return json({ ok: false, error: retention.error }, 400);
 
-  const dedupHash = await buildDedupHash(body);
+  // A dynamic entry's identity is its nodes + its SOURCE (not whichever
+  // IPs the source happens to return today), so re-generating while the
+  // list rotates still lands on the same entry and refreshes it.
+  const dedupHash = await buildDedupHash(
+    dynamic ? { ...body, preferredIps: `api:${dynamic.sourceUrl}|${dynamic.limit}` } : body,
+  );
   const dedupKey = `dedup:${dedupHash}`;
 
   let id = await env.SUB_STORE.get(dedupKey);
@@ -666,6 +882,7 @@ async function handleGenerate(request, env, url) {
       options,
       inputs,
       nodes,
+      ...(dynamic ? { dynamic, baseNodes } : {}),
     };
     const ttl = applyRetention(record, Date.now());
     await putRecord(env, id, record, undefined, ttl);
@@ -685,6 +902,14 @@ async function handleGenerate(request, env, url) {
       // Same content => the inputs are the same too; backfill them onto
       // legacy records so their owner can edit them via form backfill.
       if (!record.inputs) record.inputs = inputs;
+      // A dynamic entry re-generated against its source refreshes the
+      // stored snapshot and base nodes (retention below restarts too).
+      if (dynamic) {
+        record.dynamic = dynamic;
+        record.baseNodes = baseNodes;
+        record.inputs = inputs;
+        record.nodes = nodes;
+      }
       // The retention picked this time replaces the previous plan, and the
       // countdown restarts from now.
       record.storage = retention.storage;
@@ -703,6 +928,7 @@ async function handleGenerate(request, env, url) {
         options,
         inputs,
         nodes,
+        ...(dynamic ? { dynamic, baseNodes } : {}),
       };
       const ttl = applyRetention(record, Date.now());
       await putRecord(env, id, record, undefined, ttl);
@@ -749,9 +975,15 @@ async function handleGenerate(request, env, url) {
       host: node.host || '',
       sni: node.sni || '',
     })),
+    dynamic: dynamic
+      ? { sourceUrl: dynamic.sourceUrl, limit: dynamic.limit, sourceTotal: sourceInfo.total, fromCache: sourceInfo.fromCache }
+      : null,
     warnings: [
       ...(accessToken ? [] : ['未检测到 SUB_ACCESS_TOKEN，订阅链接将没有第二层访问保护。']),
       ...(skippedLines > 0 ? [`有 ${skippedLines} 行节点链接无法解析或端口不可用，已跳过。`] : []),
+      ...(dynamic
+        ? [`动态订阅：将自动跟随来源的最新优选 IP（约每小时刷新；来源不可用时用上次快照兜底）。来源现有 ${sourceInfo.total} 个优选地址，本次使用前 ${dynamic.limit} 个。`]
+        : []),
     ],
   });
 }
@@ -814,6 +1046,7 @@ async function handleList(request, env, url) {
         storage: meta.retention && meta.retention.startsWith('days:')
           ? { mode: 'days', days: Number(meta.retention.slice(5)) || null, expiresAt: meta.exp || null }
           : { mode: 'permanent' },
+        dynamic: false,
       };
       const raw = await env.SUB_STORE.get(key.name);
       if (raw === null || raw === undefined) {
@@ -830,6 +1063,8 @@ async function handleList(request, env, url) {
           if (servers.length) item.sources = servers;
           if (Array.isArray(rec.nodes)) item.outputNodes = rec.nodes.length;
           item.storage = rec.storage || { mode: 'permanent' };
+          item.dynamic = !!rec.dynamic;
+          if (rec.dynamic && rec.dynamic.sourceUrl) item.sourceUrl = rec.dynamic.sourceUrl;
         } catch {}
       }
       item.linkToken = await linkTokenFor(id, env);
@@ -912,6 +1147,9 @@ function buildBackfill(record) {
       exact: true,
       nodeLinks: record.inputs.nodeLinks,
       preferredIps: record.inputs.preferredIps || '',
+      ipMode: record.inputs.ipMode === 'api' ? 'api' : 'manual',
+      sourceUrl: record.inputs.sourceUrl || '',
+      sourceLimit: record.inputs.sourceLimit || 10,
     };
   }
   const reconstructed = reconstructInputs(record);
@@ -942,6 +1180,32 @@ async function handleEntry(request, env, url) {
     linkToken: await linkTokenFor(id, env),
     backfill: buildBackfill(record),
   });
+}
+
+// Test-fetch a preferred-IP source so the owner can verify an API
+// address before generating a dynamic subscription from it. Always
+// fetches live (never the cache) and requires the admin token, like
+// every other server-side fetch trigger.
+async function handleIpSourceTest(request, env) {
+  if (!env.SUB_STORE) return json({ ok: false, error: 'SUB_STORE KV 未绑定' }, 500);
+  let body;
+  try { body = await request.json(); } catch { return json({ ok: false, error: '请求体不是合法 JSON' }, 400); }
+  const denied = await checkAdmin(request, env, new URL(request.url), body);
+  if (denied) return denied;
+  try {
+    const fresh = await fetchIpSource(String(body.url || ''));
+    return json({
+      ok: true,
+      url: fresh.url,
+      candidates: fresh.candidates,
+      count: fresh.endpoints.length,
+      sample: fresh.endpoints
+        .slice(0, 5)
+        .map((ep) => (ep.port ? `${formatHostForUrl(ep.server)}:${ep.port}` : ep.server)),
+    });
+  } catch (e) {
+    return json({ ok: false, error: `拉取失败：${e.message || e}` }, 400);
+  }
 }
 
 async function handleNote(request, env) {
@@ -1068,7 +1332,16 @@ async function handleSub(request, env, url) {
   if (!raw) return text('not found', 404);
 
   const record = JSON.parse(raw);
-  const nodes = record.nodes || [];
+  let nodes = record.nodes || [];
+  if (record.dynamic && Array.isArray(record.baseNodes) && record.baseNodes.length) {
+    // Dynamic subscription: rebuild the node list from the source's
+    // current preferred IPs. Any failure keeps the stored snapshot.
+    const eps = await resolveDynamicEndpoints(env, record);
+    if (eps && eps.length) {
+      const rebuilt = buildNodes(record.baseNodes, eps, record.options || {});
+      if (rebuilt.length) nodes = rebuilt;
+    }
+  }
   let target = (url.searchParams.get('target') || '').toLowerCase();
   if (!target || target === 'auto') {
     // "Auto" really is adaptive: clients identifying themselves as
@@ -1122,6 +1395,10 @@ export default {
 
       if (request.method === 'GET' && url.pathname === '/api/entry') {
         return await handleEntry(request, env, url);
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/ip-source-test') {
+        return await handleIpSourceTest(request, env);
       }
 
       if (request.method === 'POST' && url.pathname === '/api/note') {

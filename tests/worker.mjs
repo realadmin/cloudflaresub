@@ -485,3 +485,95 @@ console.log('worker tests passed');
 
   console.log('audit-fix suite: generate auth, parse tolerance, surge injection, pointer TTL, port range, prefix cap, UA auto: passed');
 }
+
+// --- Dynamic subscription suite: API preferred-IP sources ---
+{
+  const realFetch = globalThis.fetch;
+  let txtList = '104.16.1.2\n104.16.1.3:8443\n104.16.1.4';
+  let sourceDown = false;
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    if (sourceDown) throw new Error('network down');
+    if (u === 'https://ips.example.com/list.txt') return new Response(txtList, { status: 200 });
+    if (u === 'https://ips.example.com/list.json') return new Response(JSON.stringify(['104.16.5.5', '104.16.5.6:8443']), { status: 200 });
+    if (u === 'https://ips.example.com/list.csv') return new Response('IP,port,colo\n104.16.7.7,443,HKG\n104.16.7.8,8443,SIN', { status: 200 });
+    throw new Error('unexpected fetch ' + u);
+  };
+  try {
+    // Source test endpoint: auth + parsing across formats + URL guards.
+    const noTok = await worker.fetch(new Request('https://x.pages.dev/api/ip-source-test', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url: 'https://ips.example.com/list.txt' }),
+    }), env);
+    assert.equal(noTok.status, 403, 'ip-source-test requires the admin token');
+    const testPost = (url) => worker.fetch(new Request('https://x.pages.dev/api/ip-source-test', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: 'tok', url }),
+    }), env).then((r) => r.json());
+    const t1 = await testPost('https://ips.example.com/list.txt');
+    assert.equal(t1.count, 3, 'txt source parsed');
+    assert.ok(t1.sample.includes('104.16.1.3:8443'), 'txt sample keeps explicit port');
+    assert.equal((await testPost('https://ips.example.com/list.json')).count, 2, 'json source parsed');
+    assert.equal((await testPost('https://ips.example.com/list.csv')).count, 2, 'csv source parsed (endpoint = first cell)');
+    const tHttp = await worker.fetch(new Request('https://x.pages.dev/api/ip-source-test', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ token: 'tok', url: 'http://ips.example.com/list.txt' }),
+    }), env);
+    assert.equal(tHttp.status, 400, 'http source rejected');
+    const tPriv = await worker.fetch(new Request('https://x.pages.dev/api/ip-source-test', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ token: 'tok', url: 'https://127.0.0.1/list.txt' }),
+    }), env);
+    assert.equal(tPriv.status, 400, 'private-IP source rejected');
+
+    // Generate a dynamic entry: the snapshot takes the first `limit`.
+    const dyn = await generate({ nodeLinks: node, ipMode: 'api', sourceUrl: 'https://ips.example.com/list.txt', sourceLimit: 2 });
+    assert.ok(dyn.dynamic && dyn.dynamic.sourceTotal === 3, 'dynamic metadata returned');
+    assert.equal(dyn.counts.outputNodes, 2, 'limit applied at generation');
+    assert.ok(dyn.plainText.includes('@104.16.1.2:443') && dyn.plainText.includes('@104.16.1.3:8443'), 'snapshot endpoints in order');
+    const dynSub1 = await getSub(dyn.shortId, 'plain');
+    assert.equal(dynSub1.body, dyn.plainText, 'sub initially serves the snapshot');
+
+    // The source rotates; once the cache is stale, /sub follows it.
+    txtList = '104.16.9.9\n104.16.9.10';
+    const cacheKey = [...store.keys()].find((k) => k.startsWith('ipcache:'));
+    assert.ok(cacheKey, 'source cached in KV');
+    const ageCache = () => {
+      const c = JSON.parse(store.get(cacheKey).value);
+      c.fetchedAt = Date.now() - 2 * 3600e3;
+      c.lastAttempt = 0;
+      store.set(cacheKey, { value: JSON.stringify(c) });
+    };
+    ageCache();
+    const dynSub2 = await getSub(dyn.shortId, 'plain');
+    assert.ok(dynSub2.body.includes('@104.16.9.9:443') && dynSub2.body.includes('@104.16.9.10:443'), 'sub follows the rotated source');
+    assert.ok(!dynSub2.body.includes('104.16.1.2'), 'old snapshot replaced');
+
+    // Source down + stale cache: the cached list keeps serving.
+    sourceDown = true;
+    ageCache();
+    const dynSub3 = await getSub(dyn.shortId, 'plain');
+    assert.equal(dynSub3.status, 200);
+    assert.ok(dynSub3.body.includes('@104.16.9.9:443'), 'stale cache serves while source is down');
+
+    // Source down + cache gone: the generation-time snapshot serves.
+    store.delete(cacheKey);
+    const dynSub4 = await getSub(dyn.shortId, 'plain');
+    assert.equal(dynSub4.status, 200);
+    assert.ok(dynSub4.body.includes('@104.16.1.2:443'), 'entry snapshot is the final fallback');
+    sourceDown = false;
+
+    // Identity: re-generating against the same source hits the same
+    // entry even though the list rotated in between.
+    txtList = '104.16.1.2\n104.16.1.3:8443\n104.16.1.4';
+    const dynAgain = await generate({ nodeLinks: node, ipMode: 'api', sourceUrl: 'https://ips.example.com/list.txt', sourceLimit: 2 });
+    assert.equal(dynAgain.shortId, dyn.shortId, 'dynamic dedup is by source, not by resolved IPs');
+
+    // The admin list flags the entry as dynamic.
+    const lr = await (await worker.fetch(adminReq('/api/list'), env)).json();
+    const item = lr.items.find((i) => i.id === dyn.shortId);
+    assert.equal(item.dynamic, true, 'list item marks dynamic entries');
+    assert.equal(item.sourceUrl, 'https://ips.example.com/list.txt');
+    console.log('dynamic suite: source parsing, follow-on-rotate, cache + snapshot fallbacks, source-based dedup: passed');
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+}
