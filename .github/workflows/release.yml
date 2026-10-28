@@ -50,5 +50,5 @@ jobs:
             cloudflaresub-pages.zip \
             --title "${{ steps.ver.outputs.tag }}" \
             --notes "下载说明：
-          - **在 Cloudflare Pages 里直接上传部署** → 下载 \`cloudflaresub-pages-upload.zip\`，解压后把里面的文件拖进 Pages 的上传框（部署步骤见仓库 README 的方式 A）
+          - **在 Cloudflare Pages 里直接上传部署** → 下载 \`cloudflaresub-pages-upload.zip\`，不用解压、整个 zip 直接拖进 Pages 的上传框即可（部署步骤见仓库 README 的方式 A）
           - **连接 GitHub 自动部署 / 保存源码** → 用仓库代码即可，或下载 \`cloudflaresub-pages.zip\` 整仓库包"

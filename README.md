@@ -60,10 +60,10 @@
 2. 点 **创建（Create）** → 选 **Pages** 标签页 → **上传资产（Upload assets）**
    - ⚠️ 一定要选 Pages 这条路。选错到 Workers 上传通道会得到一个“纯静态 Worker”，加不了下面的绑定，页面还会报错
 3. 给项目起个名字（比如 `my-sub`），点创建
-4. 先去本仓库的 **[Releases](../../releases)** 页面下载 `cloudflaresub-pages-upload.zip` 并解压，把**解压后的全部文件**（注意：是解压后文件夹里面的文件，不是文件夹本身；也不要用整仓库版的 zip）拖进上传框，点 **部署（Deploy）**
+4. 先去本仓库的 **[Releases](../../releases)** 页面下载 `cloudflaresub-pages-upload.zip`，**不用解压**，把这个 zip **整个拖进**上传框（Pages 会自动解压），点 **部署（Deploy）**。（先解压、再把里面的文件全选拖进去也可以，效果一样；但千万别拿整仓库版的 `cloudflaresub-pages.zip` 来直传，它的目录结构不对。）
 5. 部署完成后，进入该项目 → **设置（Settings）→ 绑定（Bindings）→ 添加（Add）**：选 **KV 命名空间**，变量名填 `SUB_STORE`（必须一字不差），命名空间没有就新建一个再选它
 6. 同样在 **设置 → 变量和机密（Variables and secrets）→ 添加**：变量名填 `SUB_ACCESS_TOKEN`，值填你自定的令牌（建议选“机密 / Secret”类型）
-7. ⚠️ **关键一步**：绑定和变量加完之后，要对新部署才生效。回到项目的 **部署（Deployments）** 页，点 **创建新部署（Create a new deployment）**，重新上传一次同样的文件部署
+7. ⚠️ **关键一步**：绑定和变量加完之后，要对新部署才生效。回到项目的 **部署（Deployments）** 页，点 **创建新部署（Create a new deployment）**，重新把同一个 zip 拖进去部署一次
 8. 打开项目给的 `https://你的项目名.pages.dev` 网址，能打开页面就是部署成功了
 
 ### 方式 B：连接 GitHub 仓库
