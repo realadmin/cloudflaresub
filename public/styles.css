@@ -126,6 +126,7 @@ textarea,
 input[type="text"],
 input[type="password"],
 input[type="number"],
+input[type="url"],
 input[type="search"],
 select,
 input[readonly] {
@@ -155,6 +156,7 @@ textarea:focus,
 input[type="text"]:focus,
 input[type="password"]:focus,
 input[type="number"]:focus,
+input[type="url"]:focus,
 input[type="search"]:focus,
 select:focus,
 input[readonly]:focus {
@@ -167,6 +169,17 @@ input[readonly]:focus {
   font-size: 0.9rem;
   margin-top: 8px;
   line-height: 1.6;
+}
+
+/* The preferred-IP panels sit under the source-mode select inside the
+   same form step; keep the form's inner rhythm instead of touching it. */
+#manualIpPanel,
+#apiIpPanel {
+  margin-top: 12px;
+}
+
+#apiIpPanel .grid {
+  margin-top: 12px;
 }
 
 .checkbox-wrap {
@@ -856,6 +869,7 @@ label {
   input[type="text"],
   input[type="password"],
   input[type="number"],
+  input[type="url"],
   input[type="search"],
   select,
   textarea {
