@@ -203,8 +203,10 @@ const sortSelect = document.getElementById('sortSelect');
 const adminSearchInput = document.getElementById('adminSearch');
 const expandAllBtn = document.getElementById('expandAllBtn');
 const collapseAllBtn = document.getElementById('collapseAllBtn');
+const selectAllCheckbox = document.getElementById('selectAllEntries');
+const deleteSelectedBtn = document.getElementById('deleteSelectedBtn');
 const adminItems = new Map();
-const adminState = { items: [], sort: 'created-desc', query: '' };
+const adminState = { items: [], sort: 'created-desc', query: '', selected: new Set() };
 
 if (adminTokenInput && sessionStorage.getItem('cfsub_admin_token')) {
   adminTokenInput.value = sessionStorage.getItem('cfsub_admin_token');
@@ -285,6 +287,23 @@ function updateAdminCount() {
   adminMsg.textContent = `共 ${total} 条，搜索到 ${visibleAdminItems().length} 条。`;
 }
 
+// Selection covers the currently visible entries only (scheme 1): the
+// header checkbox is tri-state over the visible set, and the bulk-delete
+// button counts selected-and-visible entries.
+function updateSelectionUI() {
+  const visible = visibleAdminItems();
+  const selectedVisible = visible.filter((i) => adminState.selected.has(i.id)).length;
+  if (selectAllCheckbox) {
+    selectAllCheckbox.checked = visible.length > 0 && selectedVisible === visible.length;
+    selectAllCheckbox.indeterminate = selectedVisible > 0 && selectedVisible < visible.length;
+    selectAllCheckbox.disabled = visible.length === 0;
+  }
+  if (deleteSelectedBtn) {
+    deleteSelectedBtn.disabled = selectedVisible === 0;
+    deleteSelectedBtn.textContent = selectedVisible ? `删除所选（${selectedVisible}）` : '删除所选';
+  }
+}
+
 function retentionHtml(item) {
   const st = item.storage || { mode: 'permanent' };
   return st.mode === 'days'
@@ -295,13 +314,18 @@ function retentionHtml(item) {
 function renderAdminList() {
   adminItems.clear();
   adminState.items.forEach((item) => adminItems.set(item.id, item));
+  for (const id of [...adminState.selected]) {
+    if (!adminItems.has(id)) adminState.selected.delete(id);
+  }
   if (!adminState.items.length) {
     adminBody.innerHTML = '<div class="admin-empty">KV 里还没有任何条目。</div>';
+    updateSelectionUI();
     return;
   }
   const visible = visibleAdminItems();
   if (!visible.length) {
     adminBody.innerHTML = '<div class="admin-empty">没有符合搜索条件的条目。</div>';
+    updateSelectionUI();
     return;
   }
   const token = adminToken();
@@ -311,6 +335,7 @@ function renderAdminList() {
       const retention = retentionHtml(item);
       return `<div class="entry" data-id="${escapeHtml(item.id)}">
         <div class="entry-row">
+          <div class="cell"><input type="checkbox" class="entry-check" aria-label="选择这条" ${adminState.selected.has(item.id) ? 'checked' : ''} /></div>
           <div class="cell"><textarea class="note-input" maxlength="80" rows="4" placeholder="（未填备注）">${escapeHtml(item.note || '')}</textarea></div>
           <div class="cell">${escapeHtml(created)}</div>
           <div class="cell">${retention}</div>
@@ -329,6 +354,7 @@ function renderAdminList() {
       </div>`;
     })
     .join('');
+  updateSelectionUI();
 }
 
 async function loadAdminList() {
@@ -345,6 +371,7 @@ async function loadAdminList() {
     const data = await resp.json();
     if (!resp.ok || !data.ok) throw new Error(data.error || '加载失败');
     adminState.items = data.items || [];
+    adminState.selected.clear();
     renderAdminList();
     updateAdminCount();
   } catch (e) {
@@ -356,14 +383,64 @@ if (listBtn) listBtn.addEventListener('click', loadAdminList);
 if (sortSelect) {
   sortSelect.addEventListener('change', () => {
     adminState.sort = sortSelect.value;
+    adminState.selected.clear();
     renderAdminList();
   });
 }
 if (adminSearchInput) {
   adminSearchInput.addEventListener('input', () => {
     adminState.query = adminSearchInput.value;
+    adminState.selected.clear();
     renderAdminList();
     updateAdminCount();
+  });
+}
+if (selectAllCheckbox) {
+  selectAllCheckbox.addEventListener('change', () => {
+    const visible = visibleAdminItems();
+    if (selectAllCheckbox.checked) visible.forEach((i) => adminState.selected.add(i.id));
+    else visible.forEach((i) => adminState.selected.delete(i.id));
+    renderAdminList();
+  });
+}
+if (deleteSelectedBtn) {
+  deleteSelectedBtn.addEventListener('click', async () => {
+    const token = adminToken();
+    if (!token) return;
+    const ids = visibleAdminItems().filter((i) => adminState.selected.has(i.id)).map((i) => i.id);
+    if (!ids.length) return;
+    if (!confirm(`确定删除选中的 ${ids.length} 条订阅吗？删除后它们的链接会立刻失效。`)) return;
+    deleteSelectedBtn.disabled = true;
+    let done = 0;
+    const failed = [];
+    for (let k = 0; k < ids.length; k++) {
+      deleteSelectedBtn.textContent = `删除中 ${k + 1}/${ids.length}…`;
+      const id = ids[k];
+      let data = null;
+      try {
+        const resp = await fetch('/api/delete', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ id, token }),
+        });
+        data = await resp.json().catch(() => null);
+      } catch (e) {
+        data = null;
+      }
+      if (data && data.ok) {
+        // Same rule as single delete: only a server-confirmed delete
+        // removes the entry locally.
+        done++;
+        adminState.items = adminState.items.filter((i) => i.id !== id);
+        adminItems.delete(id);
+        adminState.selected.delete(id);
+      } else {
+        failed.push(id);
+      }
+    }
+    renderAdminList();
+    adminMsg.textContent = failed.length
+      ? `已删除 ${done} 条；${failed.length} 条删除失败，已保留：${failed.join('、')}`
+      : `已删除选中的 ${done} 条。共 ${adminState.items.length} 条。`;
   });
 }
 
@@ -659,6 +736,17 @@ function closeRetentionPanel(entry) {
 }
 
 document.addEventListener('change', (event) => {
+  const check = event.target.closest?.('.entry-check');
+  if (check) {
+    const entry = check.closest('.entry');
+    const id = entry?.dataset.id;
+    if (id) {
+      if (check.checked) adminState.selected.add(id);
+      else adminState.selected.delete(id);
+      updateSelectionUI();
+    }
+    return;
+  }
   const sel = event.target.closest?.('.ret-mode');
   if (!sel) return;
   const panel = sel.closest('.entry-retention');
@@ -714,7 +802,7 @@ document.addEventListener('click', async (event) => {
     const item = adminItems.get(id);
     if (item && newStorage) item.storage = newStorage;
     const cells = entry.querySelectorAll('.entry-row .cell');
-    if (item && cells[2]) cells[2].innerHTML = retentionHtml(item);
+    if (item && cells[3]) cells[3].innerHTML = retentionHtml(item);
   } else if (!adminMsg.textContent || adminMsg.textContent.startsWith('共 ')) {
     adminMsg.textContent = `条目 ${id} 的有效期未能确认修改，请重试。`;
   }

@@ -662,7 +662,7 @@ button.small {
 .admin-head,
 .entry-row {
   display: grid;
-  grid-template-columns: minmax(170px, 1fr) 132px 100px minmax(110px, 1fr) 84px 216px;
+  grid-template-columns: 36px minmax(170px, 1fr) 132px 100px minmax(110px, 1fr) 84px 216px;
   gap: 14px;
   align-items: center;
 }
@@ -698,11 +698,20 @@ button.small {
 }
 
 /* Created-time, validity and node-count columns read better centered,
-   like their headers */
-.entry-row .cell:nth-child(2),
+   like their headers (column 1 is the selection checkbox) */
 .entry-row .cell:nth-child(3),
-.entry-row .cell:nth-child(5) {
+.entry-row .cell:nth-child(4),
+.entry-row .cell:nth-child(6) {
   text-align: center;
+}
+
+/* Selection checkboxes (per-entry and the header select-all) */
+.entry-check,
+#selectAllEntries {
+  width: 20px;
+  height: 20px;
+  accent-color: #3b82f6;
+  cursor: pointer;
 }
 
 /* The sticky magic: while an entry is expanded, its row pins to the top of
@@ -762,7 +771,7 @@ button.small {
   }
   .admin-head,
   .entry {
-    min-width: 900px;
+    min-width: 936px;
   }
   .entry.expanded .entry-row,
   .entry.retention-open .entry-row {
@@ -791,7 +800,7 @@ button.small {
    inside the box (mouse wheel / dragged scrollbar / touch swipe). The box
    stretches to the full entry-row height (driven by the actions column),
    so it grows/shrinks with the buttons instead of a fixed pixel height. */
-.entry-row .cell:first-child {
+.entry-row .cell:nth-child(2) {
   align-self: stretch;
 }
 #adminSection .note-input {
@@ -857,7 +866,9 @@ label {
     min-height: 52px;
   }
 
-  .checkbox-wrap input {
+  .checkbox-wrap input,
+  .entry-check,
+  #selectAllEntries {
     width: 24px;
     height: 24px;
   }

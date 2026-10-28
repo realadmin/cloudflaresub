@@ -339,10 +339,12 @@ cf.example.com:443#US-Edge
           <span class="toolbar-spacer"></span>
           <button id="expandAllBtn" type="button" class="secondary small">展开全部</button>
           <button id="collapseAllBtn" type="button" class="secondary small">收起全部</button>
+          <button id="deleteSelectedBtn" type="button" class="secondary small" disabled>删除所选</button>
         </div>
 
         <div class="admin-wrap">
-          <div class="admin-head" aria-hidden="true">
+          <div class="admin-head">
+            <span><input type="checkbox" id="selectAllEntries" aria-label="全选当前显示的条目" /></span>
             <span>备注（可改）</span>
             <span>创建时间</span>
             <span>有效期</span>
