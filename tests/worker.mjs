@@ -495,6 +495,10 @@ console.log('worker tests passed');
     const u = String(url);
     if (sourceDown) throw new Error('network down');
     if (u === 'https://ips.example.com/list.txt') return new Response(txtList, { status: 200 });
+    if (u === 'https://fcdn.example.com/ips.txt' || u === 'https://10.example.com/ips.txt') return new Response(txtList, { status: 200 });
+    if (u === 'https://ips.example.com/redir') {
+      return { ok: true, status: 200, url: 'https://127.0.0.1/evil', headers: { get: () => null }, text: async () => txtList };
+    }
     if (u === 'https://ips.example.com/list.json') return new Response(JSON.stringify(['104.16.5.5', '104.16.5.6:8443']), { status: 200 });
     if (u === 'https://ips.example.com/list.csv') return new Response('IP,port,colo\n104.16.7.7,443,HKG\n104.16.7.8,8443,SIN', { status: 200 });
     throw new Error('unexpected fetch ' + u);
@@ -572,6 +576,23 @@ console.log('worker tests passed');
     const item = lr.items.find((i) => i.id === dyn.shortId);
     assert.equal(item.dynamic, true, 'list item marks dynamic entries');
     assert.equal(item.sourceUrl, 'https://ips.example.com/list.txt');
+
+    // Audit regressions (second self-audit): URL-guard false positives,
+    // redirect smuggling, URL-normalization dedup, backfill snapshots.
+    assert.equal((await testPost('https://fcdn.example.com/ips.txt')).count, 3, 'DNS names starting with fc are not private IPs');
+    assert.equal((await testPost('https://10.example.com/ips.txt')).count, 3, 'DNS names starting with digits are not private IPs');
+    const tRedir = await worker.fetch(new Request('https://x.pages.dev/api/ip-source-test', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ token: 'tok', url: 'https://ips.example.com/redir' }),
+    }), env);
+    assert.equal(tRedir.status, 400, 'redirect to a private target is rejected');
+    const v1 = await generate({ nodeLinks: node, ipMode: 'api', sourceUrl: 'https://IPS.example.com:443/list.txt', sourceLimit: 2 });
+    const v2 = await generate({ nodeLinks: node, ipMode: 'api', sourceUrl: 'https://ips.example.com/list.txt', sourceLimit: 2 });
+    assert.equal(v1.shortId, dyn.shortId, 'uppercase/default-port variant lands on the original entry');
+    assert.equal(v2.shortId, v1.shortId, 'source URL spelling variants dedup to one entry');
+    const entryResp = await (await worker.fetch(adminReq(`/api/entry?id=${dyn.shortId}`), env)).json();
+    assert.equal(entryResp.backfill.ipMode, 'api', 'backfill knows api mode');
+    assert.ok(entryResp.backfill.preferredIps.includes('104.16.1.2'), 'backfill carries snapshot lines for manual switching');
     console.log('dynamic suite: source parsing, follow-on-rotate, cache + snapshot fallbacks, source-based dedup: passed');
   } finally {
     globalThis.fetch = realFetch;

@@ -117,15 +117,23 @@ function assertSourceUrl(raw) {
     throw new Error('来源地址不是合法 URL');
   }
   if (u.protocol !== 'https:') throw new Error('来源地址必须以 https:// 开头');
+  // Credentials in a source URL would be stored on the entry; strip them.
+  u.username = '';
+  u.password = '';
   const host = u.hostname.toLowerCase();
   if (host === 'localhost' || host.endsWith('.local') || host.endsWith('.internal')) {
     throw new Error('来源地址不允许指向内网主机');
   }
+  // Private-range checks apply to IP literals only. The URL parser has
+  // already canonicalized any typed IP (hex / octal / integer forms all
+  // become dotted-quad), so a DNS name that merely starts with digits
+  // or "fc" (fcdn.example.com, 10.example.com) is not mistaken for one.
   const bare = host.replace(/^\[|\]$/g, '');
+  const isV4Literal = /^(\d{1,3}\.){3}\d{1,3}$/.test(bare);
+  const isV6Literal = bare.includes(':');
   if (
-    /^(10\.|127\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|0\.)/.test(bare) ||
-    bare === '::1' ||
-    /^(fc|fd|fe80)/.test(bare)
+    (isV4Literal && /^(10\.|127\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|0\.)/.test(bare)) ||
+    (isV6Literal && (bare === '::1' || /^(fc|fd|fe80)/.test(bare)))
   ) {
     throw new Error('来源地址不允许指向内网 IP');
   }
@@ -140,8 +148,11 @@ function extractEndpointTokens(text) {
   // node's own port, which is the common case for these lists.
   const tokens = [];
   const re = /\[([0-9a-fA-F:]+)\](?::(\d{1,5}))?|(\d{1,3}(?:\.\d{1,3}){3})(?::(\d{1,5}))?|\b((?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,})(?::(\d{1,5}))?/;
-  for (const line of String(text).split(/\r?\n/)) {
-    const m = line.match(re);
+  const lines = String(text).split(/\r?\n/);
+  for (let i = 0; i < lines.length && i < 20000 && tokens.length < 2000; i++) {
+    // An endpoint is short; matching only a line's head bounds the regex
+    // work a hostile or broken source can make us do per line.
+    const m = lines[i].slice(0, 600).match(re);
     if (!m) continue;
     if (m[1]) tokens.push(m[2] ? `[${m[1]}]:${m[2]}` : m[1]);
     else if (m[3]) tokens.push(m[4] ? `${m[3]}:${m[4]}` : m[3]);
@@ -180,6 +191,34 @@ function jsonCandidateStrings(text) {
   return strings;
 }
 
+// Read a response body with a hard byte cap, enforced WHILE streaming
+// (a post-hoc length check would still buffer an unbounded body first).
+async function readBodyCapped(resp) {
+  const declared = Number(resp.headers?.get?.('content-length') || 0);
+  if (declared > IP_SOURCE_MAX_BYTES) throw new Error('来源内容过大（超过 512KB）');
+  if (!resp.body || typeof resp.body.getReader !== 'function') {
+    const t = await resp.text();
+    if (t.length > IP_SOURCE_MAX_BYTES) throw new Error('来源内容过大（超过 512KB）');
+    return t;
+  }
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let out = '';
+  let bytes = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    bytes += value.byteLength;
+    if (bytes > IP_SOURCE_MAX_BYTES) {
+      try { await reader.cancel(); } catch {}
+      throw new Error('来源内容过大（超过 512KB）');
+    }
+    out += decoder.decode(value, { stream: true });
+  }
+  out += decoder.decode();
+  return out;
+}
+
 async function fetchIpSource(rawUrl) {
   const url = assertSourceUrl(rawUrl);
   const ctrl = new AbortController();
@@ -192,14 +231,18 @@ async function fetchIpSource(rawUrl) {
       headers: { 'user-agent': 'cloudflaresub (preferred-ip source)', accept: 'text/plain, application/json, */*' },
     });
     if (!resp.ok) throw new Error(`来源返回 HTTP ${resp.status}`);
-    text = await resp.text();
+    // A redirect must not smuggle the fetch to an http or private
+    // target the original URL check would have rejected.
+    if (resp.url) assertSourceUrl(resp.url);
+    // The body read stays inside the abort window: a slow-drip source
+    // cannot hold a /sub refresh open past the same 5 seconds.
+    text = await readBodyCapped(resp);
   } catch (e) {
     if (e && e.name === 'AbortError') throw new Error('来源拉取超时（5 秒）');
     throw e instanceof Error ? e : new Error('来源拉取失败');
   } finally {
     clearTimeout(timer);
   }
-  if (text.length > IP_SOURCE_MAX_BYTES) throw new Error('来源内容过大（超过 512KB）');
   const jsonStrings = jsonCandidateStrings(text);
   const candidates = jsonStrings
     ? jsonStrings.flatMap((s) => extractEndpointTokens(s))
@@ -240,20 +283,20 @@ async function getSourceEndpoints(env, rawUrl, now = Date.now()) {
   const url = assertSourceUrl(rawUrl);
   const cached = await readIpCache(env, url);
   if (cached && now - (cached.fetchedAt || 0) < IP_SOURCE_FRESH_MS) {
-    return { endpoints: cached.endpoints, fromCache: true, fetchedAt: cached.fetchedAt };
+    return { url, endpoints: cached.endpoints, fromCache: true, fetchedAt: cached.fetchedAt };
   }
   if (cached && now - (cached.lastAttempt || 0) < IP_SOURCE_RETRY_MS) {
-    return { endpoints: cached.endpoints, fromCache: true, fetchedAt: cached.fetchedAt };
+    return { url, endpoints: cached.endpoints, fromCache: true, fetchedAt: cached.fetchedAt };
   }
   try {
     const fresh = await fetchIpSource(url);
     if (!fresh.endpoints.length) throw new Error('来源没有返回可用的优选地址');
     await writeIpCache(env, url, { url, fetchedAt: now, lastAttempt: now, endpoints: fresh.endpoints });
-    return { endpoints: fresh.endpoints, fromCache: false, fetchedAt: now, candidates: fresh.candidates };
+    return { url, endpoints: fresh.endpoints, fromCache: false, fetchedAt: now, candidates: fresh.candidates };
   } catch (e) {
     if (cached) {
       await writeIpCache(env, url, { ...cached, lastAttempt: now });
-      return { endpoints: cached.endpoints, fromCache: true, fetchedAt: cached.fetchedAt, refreshError: e.message };
+      return { url, endpoints: cached.endpoints, fromCache: true, fetchedAt: cached.fetchedAt, refreshError: e.message };
     }
     throw e;
   }
@@ -276,7 +319,8 @@ async function resolveDynamicEndpoints(env, record) {
 
 function parseSourceLimit(value) {
   const n = Number(value);
-  return Number.isInteger(n) ? Math.min(100, Math.max(1, n)) : 10;
+  if (!Number.isFinite(n)) return 10;
+  return Math.min(100, Math.max(1, Math.trunc(n)));
 }
 
 function parseVmess(link) {
@@ -816,7 +860,10 @@ async function handleGenerate(request, env, url) {
       return json({ ok: false, error: '优选 IP 来源没有返回可用的优选地址' }, 400);
     }
     dynamic = {
-      sourceUrl: String(body.sourceUrl || '').trim(),
+      // The NORMALIZED URL (host lowercased, default port dropped) is
+      // the entry's source identity: spelling variants of the same
+      // source dedup onto one entry instead of minting duplicates.
+      sourceUrl: source.url,
       limit,
       endpoints: preferredEndpoints,
       snapshotAt: new Date().toISOString(),
@@ -1134,6 +1181,14 @@ function reconstructInputs(record) {
   return { nodeLinks: links.join('\n'), preferredIps: endpointLines.join('\n') };
 }
 
+// A dynamic entry's snapshot endpoints rendered as pasted-list lines.
+function snapshotLines(record) {
+  const eps = record.dynamic && Array.isArray(record.dynamic.endpoints) ? record.dynamic.endpoints : [];
+  return eps
+    .map((ep) => (ep.port ? `${formatHostForUrl(ep.server)}:${ep.port}` : ep.server))
+    .join('\n');
+}
+
 function buildBackfill(record) {
   const base = {
     namePrefix: record.options?.namePrefix || '',
@@ -1146,7 +1201,9 @@ function buildBackfill(record) {
       ...base,
       exact: true,
       nodeLinks: record.inputs.nodeLinks,
-      preferredIps: record.inputs.preferredIps || '',
+      // A dynamic entry stores no pasted list; hand back its snapshot
+      // endpoints so switching it to manual mode still has IPs to use.
+      preferredIps: record.inputs.preferredIps || snapshotLines(record),
       ipMode: record.inputs.ipMode === 'api' ? 'api' : 'manual',
       sourceUrl: record.inputs.sourceUrl || '',
       sourceLimit: record.inputs.sourceLimit || 10,
