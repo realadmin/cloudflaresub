@@ -117,6 +117,12 @@ form.addEventListener('submit', async (event) => {
   } catch (error) {
     warningBox.textContent = error.message || '请求失败';
     warningBox.classList.remove('hidden');
+    // The warning box lives in the result section below the form, and on
+    // failure nothing else on screen changes — without scrolling, the
+    // owner would never see why the generate seemingly did nothing.
+    if (typeof warningBox.scrollIntoView === 'function') {
+      warningBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
   } finally {
     submitBtn.disabled = false;
     submitBtn.textContent = '生成订阅';
