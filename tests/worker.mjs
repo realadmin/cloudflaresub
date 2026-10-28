@@ -329,5 +329,23 @@ console.log('worker tests passed');
   const e4 = await getEntry('ancient1');
   assert.equal(e4.backfill, null, 'record without sources/nodes: backfill null');
   store.delete('sub:ancient1');
-  console.log('backfill suite: exact, reconstruction, round-trips, null case passed');
+
+  // 5) Delete removes the stored inputs along with everything else: the
+  //    inputs live INSIDE the single sub:<id> record value (no separate
+  //    key), and delete clears record + note pointer + dedup key.
+  const genD = await generate({ nodeLinks: nodeA, preferredIps: '203.0.113.9', namePrefix: 'D', note: '待删条目' });
+  const recD = JSON.parse(store.get(`sub:${genD.shortId}`).value);
+  assert.ok(recD.inputs && recD.inputs.nodeLinks === nodeA, 'inputs stored inside the record');
+  const keysBefore = [...store.keys()].filter((k) => k.includes(genD.shortId) || k === `dedup:${recD.dedupHash}`);
+  assert.equal(keysBefore.length, 3, 'record + note pointer + dedup key exist before delete');
+  const delResp = await worker.fetch(new Request('https://x.pages.dev/api/delete', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ id: genD.shortId, token: 'tok' }),
+  }), env);
+  assert.equal((await delResp.json()).ok, true);
+  const keysAfter = [...store.keys()].filter((k) => k.includes(genD.shortId) || k === `dedup:${recD.dedupHash}`);
+  assert.equal(keysAfter.length, 0, 'delete leaves no trace of the entry, inputs included');
+  const e5 = await worker.fetch(new Request(`https://x.pages.dev/api/entry?id=${genD.shortId}&token=tok`), env);
+  assert.equal(e5.status, 404, 'deleted entry reads 404');
+  console.log('backfill suite: exact, reconstruction, round-trips, null case, delete cleanup passed');
 }
