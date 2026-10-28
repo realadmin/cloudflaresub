@@ -587,6 +587,13 @@ async function handleGenerate(request, env, url) {
   const providedNote = typeof body.note === 'string' && body.note.trim() !== ''
     ? sanitizeNote(body.note)
     : null;
+  // Raw form inputs, kept so this entry can later be backfilled into the
+  // generate form for editing (exact restore). Entries created before this
+  // field existed are reconstructed from their stored nodes instead.
+  const inputs = {
+    nodeLinks: String(body.nodeLinks || '').slice(0, 100000),
+    preferredIps: String(body.preferredIps || '').slice(0, 50000),
+  };
   const retention = parseRetention(body);
   if (retention.error) return json({ ok: false, error: retention.error }, 400);
 
@@ -606,6 +613,7 @@ async function handleGenerate(request, env, url) {
       dedupHash,
       sources,
       options,
+      inputs,
       nodes,
     };
     const ttl = applyRetention(record, Date.now());
@@ -623,6 +631,9 @@ async function handleGenerate(request, env, url) {
       if (providedNote !== null) record.note = providedNote;
       if (!record.sources) record.sources = sources;
       if (!record.dedupHash) record.dedupHash = dedupHash;
+      // Same content => the inputs are the same too; backfill them onto
+      // legacy records so their owner can edit them via form backfill.
+      if (!record.inputs) record.inputs = inputs;
       // The retention picked this time replaces the previous plan, and the
       // countdown restarts from now.
       record.storage = retention.storage;
@@ -639,6 +650,7 @@ async function handleGenerate(request, env, url) {
         dedupHash,
         sources,
         options,
+        inputs,
         nodes,
       };
       const ttl = applyRetention(record, Date.now());
@@ -757,6 +769,83 @@ async function handleList(request, env, url) {
   return json({ ok: true, count: items.length, items });
 }
 
+// ---- Form backfill -------------------------------------------------------
+// The generate form's inputs for an existing entry, so the owner can load
+// the entry back into the form and edit it. Newer records store the raw
+// inputs verbatim (exact). Older records are reconstructed from their
+// expanded nodes: generation laid nodes out as sources x endpoints, so
+// source i's original node is its first expanded node with the preferred
+// server/port/name swapped back for the source's own, and the preferred
+// list is rebuilt per endpoint position.
+function nameTailOf(nodeName, sourceName, prefix) {
+  let rest = String(nodeName || '');
+  if (sourceName && rest.startsWith(`${sourceName} | `)) rest = rest.slice(sourceName.length + 3);
+  else if (sourceName && rest === sourceName) rest = '';
+  if (prefix && rest.startsWith(`${prefix} | `)) rest = rest.slice(prefix.length + 3);
+  else if (prefix && rest === prefix) rest = '';
+  return rest;
+}
+
+function reconstructInputs(record) {
+  const sources = Array.isArray(record.sources) ? record.sources : [];
+  const nodes = Array.isArray(record.nodes) ? record.nodes : [];
+  if (!sources.length || !nodes.length || nodes.length % sources.length !== 0) return null;
+  const perSource = nodes.length / sources.length;
+  if (!perSource) return null;
+  const prefix = (record.options?.namePrefix || '').trim();
+  const keep = record.options?.keepOriginalHost !== false;
+
+  const endpointLines = [];
+  for (let j = 0; j < perSource; j++) {
+    const first = nodes[j];
+    const ports = sources.map((s, i) => nodes[i * perSource + j].port);
+    // If every source kept its own port at this position, the endpoint
+    // itself carried no port (each node used its original port).
+    const portless = ports.every((p, i) => Number(p) === Number(sources[i].port));
+    // A generated name ends with either the endpoint remark or a global
+    // counter. Identical tails across sources mean a remark (counters
+    // differ per source); check the counter pattern explicitly.
+    const tails = sources.map((s, i) => nameTailOf(nodes[i * perSource + j].name, s.name, prefix));
+    let remark = '';
+    if (tails[0] && tails.every((t) => t === tails[0])
+        && !tails.every((t, i) => t === String(i * perSource + j + 1))) {
+      remark = tails[0];
+    }
+    let line = formatHostForUrl(first.server);
+    if (!portless) line += `:${ports[0]}`;
+    if (remark) line += `#${remark}`;
+    endpointLines.push(line);
+  }
+
+  const links = sources.map((s, i) => {
+    const node = { ...nodes[i * perSource], server: s.server, port: s.port, name: s.name };
+    if (!keep) { node.host = ''; node.sni = ''; }
+    return encodeNodeLink(node);
+  });
+  if (links.some((l) => !l)) return null;
+  return { nodeLinks: links.join('\n'), preferredIps: endpointLines.join('\n') };
+}
+
+function buildBackfill(record) {
+  const base = {
+    namePrefix: record.options?.namePrefix || '',
+    keepOriginalHost: record.options?.keepOriginalHost !== false,
+    note: record.note || '',
+    storage: record.storage || { mode: 'permanent' },
+  };
+  if (record.inputs && typeof record.inputs.nodeLinks === 'string' && record.inputs.nodeLinks) {
+    return {
+      ...base,
+      exact: true,
+      nodeLinks: record.inputs.nodeLinks,
+      preferredIps: record.inputs.preferredIps || '',
+    };
+  }
+  const reconstructed = reconstructInputs(record);
+  if (reconstructed) return { ...base, exact: false, ...reconstructed };
+  return null;
+}
+
 // Direct single-record read for write verification. Deliberately NOT built
 // on KV list(): the list index lags behind fresh writes, which made the
 // UI's read-back check report false failures. A point get() reflects the
@@ -777,6 +866,7 @@ async function handleEntry(request, env, url) {
     note: record.note || '',
     createdAt: record.createdAt || null,
     storage: record.storage || { mode: 'permanent' },
+    backfill: buildBackfill(record),
   });
 }
 

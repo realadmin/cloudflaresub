@@ -296,6 +296,7 @@ function renderAdminList() {
               <button type="button" class="secondary small" data-admin-action="save">存备注</button>
               <button type="button" class="secondary small" data-admin-action="retention">修改有效期</button>
               <button type="button" class="secondary small" data-admin-action="delete">删除</button>
+              <button type="button" class="secondary small span-all" data-admin-action="backfill">回填到生成区</button>
             </div>
           </div>
         </div>
@@ -442,6 +443,31 @@ async function pollEntry(id, token, predicate) {
   return null;
 }
 
+// Load an entry's stored inputs back into the generate form for editing.
+// Regenerating afterwards follows the usual rules: changed content makes a
+// new entry, unchanged content refreshes the same entry.
+function fillGenerateForm(bf) {
+  const setValue = (id, value) => {
+    const el = document.getElementById(id);
+    if (el) el.value = value ?? '';
+  };
+  setValue('nodeLinks', bf.nodeLinks);
+  setValue('preferredIps', bf.preferredIps);
+  setValue('namePrefix', bf.namePrefix);
+  const keep = document.getElementById('keepOriginalHost');
+  if (keep) keep.checked = bf.keepOriginalHost !== false;
+  setValue('subNote', bf.note);
+  const mode = document.getElementById('storageMode');
+  if (mode) {
+    mode.value = bf.storage?.mode === 'days' ? 'days' : 'permanent';
+    mode.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  if (bf.storage?.mode === 'days' && bf.storage.days) setValue('retentionDays', bf.storage.days);
+  if (typeof form.scrollIntoView === 'function') {
+    form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}
+
 document.addEventListener('click', async (event) => {
   const btn = event.target.closest('[data-admin-action]');
   if (!btn) return;
@@ -451,6 +477,25 @@ document.addEventListener('click', async (event) => {
   if (!id || !token) return;
   const action = btn.dataset.adminAction;
 
+  if (action === 'backfill') {
+    btn.disabled = true;
+    try {
+      const q = new URLSearchParams({ id, token });
+      const resp = await fetch(`/api/entry?${q.toString()}`);
+      const data = await resp.json().catch(() => null);
+      if (!resp.ok || !data?.ok) throw new Error((data && data.error) || '回填失败，请重试');
+      if (!data.backfill) throw new Error('这条记录缺少可还原的数据，无法回填');
+      fillGenerateForm(data.backfill);
+      adminMsg.textContent = data.backfill.exact
+        ? `条目 ${id} 已回填到生成区，修改后点「生成订阅」即可。`
+        : `条目 ${id} 已按已存数据还原并回填到生成区（老条目，可能与原始输入略有差异），修改后点「生成订阅」即可。`;
+    } catch (err) {
+      adminMsg.textContent = err.message || '回填失败，请重试';
+    } finally {
+      btn.disabled = false;
+    }
+    return;
+  }
   if (action === 'retention') {
     toggleRetentionPanel(entry);
     return;

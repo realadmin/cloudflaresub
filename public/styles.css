@@ -754,6 +754,9 @@ button.small {
 .admin-actions button {
   width: 100%;
 }
+.admin-actions .span-all {
+  grid-column: 1 / -1;
+}
 
 /* Note editor: a tall multi-line box. Long notes wrap, and overflow scrolls
    inside the box (mouse wheel / dragged scrollbar / touch swipe). */

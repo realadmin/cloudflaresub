@@ -257,3 +257,77 @@ console.log('worker tests passed');
   store.delete('sub:ghost000');
   console.log('ghost key regression: passed');
 }
+
+// --- Form backfill suite: exact inputs for new entries, reconstruction for legacy ---
+{
+  const getEntry = async (id) => {
+    const r = await worker.fetch(new Request(`https://x.pages.dev/api/entry?id=${id}&token=tok`), env);
+    return r.json();
+  };
+
+  // 1) New entry: backfill is the verbatim form input.
+  const nodeA = 'vless://11111111-2222-4333-8444-555555555555@edge-a.example.com:443?encryption=none&security=tls&sni=edge-a.example.com&host=edge-a.example.com&type=ws&path=%2Fws#NodeA';
+  const nodeB = 'trojan://pw123@edge-b.example.com:8443?security=tls&sni=edge-b.example.com&type=ws&host=edge-b.example.com&path=%2Ftj#NodeB';
+  const gen = await generate({
+    nodeLinks: `${nodeA}\n${nodeB}`,
+    preferredIps: '198.51.100.7:2053#P1\nbestcf.example.net',
+    namePrefix: 'PX', keepOriginalHost: true, note: '回填测试',
+    storageMode: 'days', retentionDays: 12,
+  });
+  const e1 = await getEntry(gen.shortId);
+  assert.equal(e1.backfill.exact, true, 'new entry backfills exactly');
+  assert.equal(e1.backfill.nodeLinks, `${nodeA}\n${nodeB}`);
+  assert.equal(e1.backfill.preferredIps, '198.51.100.7:2053#P1\nbestcf.example.net');
+  assert.equal(e1.backfill.namePrefix, 'PX');
+  assert.equal(e1.backfill.keepOriginalHost, true);
+  assert.equal(e1.backfill.note, '回填测试');
+  assert.equal(e1.backfill.storage.mode, 'days');
+  assert.equal(e1.backfill.storage.days, 12);
+
+  // 2) Legacy entry (inputs stripped): reconstruction restores the
+  //    preferred list verbatim (port + remark on #1, portless domain on #2)
+  //    and the originals well enough that regenerating dedup-hits the
+  //    very same entry; the dedup hit then backfills exact inputs.
+  const key = `sub:${gen.shortId}`;
+  const rec = JSON.parse(store.get(key).value);
+  delete rec.inputs;
+  store.get(key).value = JSON.stringify(rec);
+  const e2 = await getEntry(gen.shortId);
+  assert.equal(e2.backfill.exact, false, 'legacy entry uses reconstruction');
+  assert.equal(e2.backfill.preferredIps, '198.51.100.7:2053#P1\nbestcf.example.net', 'reconstructed preferred list');
+  const regen = await generate({
+    nodeLinks: e2.backfill.nodeLinks,
+    preferredIps: e2.backfill.preferredIps,
+    namePrefix: e2.backfill.namePrefix,
+    keepOriginalHost: e2.backfill.keepOriginalHost,
+  });
+  assert.equal(regen.shortId, gen.shortId, 'reconstructed inputs regenerate the same entry');
+  const e3 = await getEntry(gen.shortId);
+  assert.equal(e3.backfill.exact, true, 'dedup hit backfills exact inputs onto legacy record');
+
+  // 3) vmess round-trip: reconstruction regenerates identical subscription
+  //    content (the re-encoded vmess text differs, so no id assertion).
+  const nodeC = 'vmess://ewogICJ2IjogIjIiLAogICJwcyI6ICJkZW1vIiwKICAiYWRkIjogImVkZ2UuZXhhbXBsZS5jb20iLAogICJwb3J0IjogIjQ0MyIsCiAgImlkIjogIjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMSIsCiAgInNjeSI6ICJhdXRvIiwKICAibmV0IjogIndzIiwKICAidGxzIjogInRscyIsCiAgInBhdGgiOiAiL3dzIiwKICAiaG9zdCI6ICJlZGdlLmV4YW1wbGUuY29tIiwKICAic25pIjogImVkZ2UuZXhhbXBsZS5jb20iCn0=';
+  const genC = await generate({ nodeLinks: nodeC, preferredIps: '192.0.2.10:8443\n192.0.2.11', namePrefix: 'PX', keepOriginalHost: true });
+  const keyC = `sub:${genC.shortId}`;
+  const recC = JSON.parse(store.get(keyC).value);
+  delete recC.inputs;
+  store.get(keyC).value = JSON.stringify(recC);
+  const eC = await getEntry(genC.shortId);
+  assert.equal(eC.backfill.exact, false);
+  assert.equal(eC.backfill.preferredIps, '192.0.2.10:8443\n192.0.2.11', 'counter suffixes are not mistaken for remarks');
+  const regenC = await generate({
+    nodeLinks: eC.backfill.nodeLinks,
+    preferredIps: eC.backfill.preferredIps,
+    namePrefix: eC.backfill.namePrefix,
+    keepOriginalHost: eC.backfill.keepOriginalHost,
+  });
+  assert.equal(regenC.plainText, genC.plainText, 'vmess reconstruction regenerates identical content');
+
+  // 4) Record without sources/nodes cannot be backfilled.
+  store.set('sub:ancient1', { value: JSON.stringify({ version: 1, createdAt: '2026-01-01T00:00:00.000Z' }), metadata: {}, expirationTtl: undefined });
+  const e4 = await getEntry('ancient1');
+  assert.equal(e4.backfill, null, 'record without sources/nodes: backfill null');
+  store.delete('sub:ancient1');
+  console.log('backfill suite: exact, reconstruction, round-trips, null case passed');
+}
