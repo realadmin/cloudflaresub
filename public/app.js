@@ -413,6 +413,7 @@ if (expandAllBtn) {
   expandAllBtn.addEventListener('click', async () => {
     for (const entry of adminBody.querySelectorAll('.entry')) {
       await setDetail(entry, true);
+      openRetentionPanel(entry);
     }
   });
 }
@@ -420,6 +421,7 @@ if (collapseAllBtn) {
   collapseAllBtn.addEventListener('click', async () => {
     for (const entry of adminBody.querySelectorAll('.entry')) {
       await setDetail(entry, false);
+      closeRetentionPanel(entry);
     }
   });
 }
@@ -554,7 +556,7 @@ function buildRetentionPanel(item) {
   return panel;
 }
 
-function toggleRetentionPanel(entry) {
+function openRetentionPanel(entry) {
   const item = adminItems.get(entry?.dataset.id || '');
   if (!entry || !item) return;
   let panel = entry.querySelector('.entry-retention');
@@ -562,9 +564,14 @@ function toggleRetentionPanel(entry) {
     panel = buildRetentionPanel(item);
     entry.querySelector('.entry-row').after(panel);
   }
-  const opening = panel.classList.contains('hidden');
-  panel.classList.toggle('hidden', !opening);
-  entry.classList.toggle('retention-open', opening);
+  panel.classList.remove('hidden');
+  entry.classList.add('retention-open');
+}
+
+function toggleRetentionPanel(entry) {
+  const panel = entry?.querySelector('.entry-retention');
+  if (panel && !panel.classList.contains('hidden')) closeRetentionPanel(entry);
+  else openRetentionPanel(entry);
 }
 
 function closeRetentionPanel(entry) {
