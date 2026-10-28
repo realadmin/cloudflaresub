@@ -598,3 +598,46 @@ console.log('worker tests passed');
     globalThis.fetch = realFetch;
   }
 }
+
+// --- Audit round 3 suite: hostile node links vs output formats, output cap ---
+{
+  // Node links are semi-untrusted input (they get copied from public
+  // sources): fields carrying newlines/commas must not be able to forge
+  // Clash YAML keys or whole Surge config lines.
+  const b64 = (s) => Buffer.from(s, 'utf8').toString('base64');
+  const evilVmess = 'vmess://' + b64(JSON.stringify({
+    v: '2', ps: 'evilvmess', add: 'a.example.com', port: '443',
+    id: 'f541611e-0aeb-4900-aa47-6e95d4916a49\n    tls: false\n    injected: yes',
+    aid: '0', scy: 'auto\n    udp: false', net: 'ws', host: 'h.example.com', path: '/ws', tls: 'tls',
+  }));
+  const evilTrojan = 'trojan://pw%0A%5BProxy%5D%0AFake%20%3D%20trojan%2C%206.6.6.6%2C%20443%2C%20password%3Dx@t.example.com:443?security=tls&type=ws&path=%2Fws&host=h.example.com#eviltrojan';
+  const evil = await generate({ nodeLinks: evilVmess + '\n' + evilTrojan, preferredIps: '104.16.1.2' });
+  assert.equal(evil.counts.outputNodes, 2);
+
+  const clash = await getSub(evil.shortId, 'clash');
+  assert.ok(!clash.body.includes('\n    injected'), 'no forged YAML key from uuid');
+  assert.ok(!clash.body.includes('\npassword:'), 'no unindented password line from trojan password');
+  assert.ok(clash.body.includes('cipher: "auto'), 'cipher is a quoted scalar');
+  assert.ok(clash.body.includes('uuid: "f541611e'), 'uuid is a quoted scalar');
+  assert.ok(clash.body.includes('server: "104.16.1.2"'), 'server is a quoted scalar');
+
+  const surge = await getSub(evil.shortId, 'surge');
+  const surgeLines = surge.body.split('\n');
+  assert.equal(surgeLines.filter((l) => l === '[Proxy]').length, 1, 'exactly one [Proxy] section');
+  assert.ok(!surgeLines.some((l) => l.startsWith('Fake')), 'no forged Surge proxy line');
+  assert.equal(surgeLines.filter((l) => l.includes(' = vmess, ') || l.includes(' = trojan, ')).length, 2, 'both proxies stay on single lines');
+
+  // Output ceiling: nodes x endpoints is refused past 10000 with the
+  // real numbers, and exactly 10000 still succeeds.
+  const manyIps = (n) => Array.from({ length: n }, (_, i) => `104.16.${(i >> 8) & 255}.${i & 255}`).join('\n');
+  const tooMany = await worker.fetch(new Request('https://x.pages.dev/api/generate', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ token: 'tok', nodeLinks: node + '\n' + node.replace('#US-Node-1', '#US-Node-2'), preferredIps: manyIps(6000) }),
+  }), env);
+  assert.equal(tooMany.status, 400, 'cartesian explosion refused');
+  const tooManyJson = await tooMany.json();
+  assert.ok(tooManyJson.error.includes('12000') && tooManyJson.error.includes('组合过多'), 'error names the real count');
+  const atCap = await generate({ nodeLinks: node, preferredIps: manyIps(10000) });
+  assert.equal(atCap.counts.outputNodes, 10000, 'exactly at the cap succeeds');
+  console.log('audit round 3 suite: output-format injection sealed, output cap enforced: passed');
+}

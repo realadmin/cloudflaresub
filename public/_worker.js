@@ -39,10 +39,15 @@ function b64DecodeUtf8(str) {
 }
 
 function escapeYaml(str = '') {
+  // For double-quoted YAML scalars: escape the quote/backslash, spell
+  // out tabs, and flatten line breaks and control characters — a raw
+  // CR is a line break to a YAML parser just like LF.
   return String(str)
     .replace(/\\/g, '\\\\')
     .replace(/"/g, '\\"')
-    .replace(/\n/g, ' ');
+    .replace(/\t/g, '\\t')
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '');
 }
 
 function splitHostAndPort(value) {
@@ -504,14 +509,14 @@ function renderClash(nodes) {
         const lines = [
           `  - name: "${escapeYaml(node.name)}"`,
           `    type: vmess`,
-          `    server: ${node.server.includes(':') ? '"' + escapeYaml(node.server) + '"' : node.server}`,
-          `    port: ${node.port}`,
-          `    uuid: ${node.uuid}`,
+          `    server: "${escapeYaml(node.server)}"`,
+          `    port: ${Number(node.port) || 0}`,
+          `    uuid: "${escapeYaml(node.uuid)}"`,
           `    alterId: 0`,
-          `    cipher: ${node.cipher || 'auto'}`,
+          `    cipher: "${escapeYaml(node.cipher || 'auto')}"`,
           `    udp: true`,
           `    tls: ${node.tls ? 'true' : 'false'}`,
-          `    network: ${node.network || 'ws'}`,
+          `    network: "${escapeYaml(node.network || 'ws')}"`,
         ];
 
         if (node.sni) {
@@ -534,12 +539,12 @@ function renderClash(nodes) {
         const lines = [
           `  - name: "${escapeYaml(node.name)}"`,
           `    type: vless`,
-          `    server: ${node.server.includes(':') ? '"' + escapeYaml(node.server) + '"' : node.server}`,
-          `    port: ${node.port}`,
-          `    uuid: ${node.uuid}`,
+          `    server: "${escapeYaml(node.server)}"`,
+          `    port: ${Number(node.port) || 0}`,
+          `    uuid: "${escapeYaml(node.uuid)}"`,
           `    udp: true`,
           `    tls: ${node.tls ? 'true' : 'false'}`,
-          `    network: ${node.network || 'ws'}`,
+          `    network: "${escapeYaml(node.network || 'ws')}"`,
         ];
 
         if (node.sni) {
@@ -562,8 +567,8 @@ function renderClash(nodes) {
         const lines = [
           `  - name: "${escapeYaml(node.name)}"`,
           `    type: trojan`,
-          `    server: ${node.server.includes(':') ? '"' + escapeYaml(node.server) + '"' : node.server}`,
-          `    port: ${node.port}`,
+          `    server: "${escapeYaml(node.server)}"`,
+          `    port: ${Number(node.port) || 0}`,
           `    password: "${escapeYaml(node.password || '')}"`,
           `    udp: true`,
         ];
@@ -577,7 +582,7 @@ function renderClash(nodes) {
         }
 
         if (node.network) {
-          lines.push(`    network: ${node.network}`);
+          lines.push(`    network: "${escapeYaml(node.network)}"`);
         }
 
         if (node.network === 'ws') {
@@ -646,14 +651,22 @@ function surgeName(name) {
   return String(name || '').replace(/[\r\n,]+/g, ' ').trim();
 }
 
+function surgeField(value) {
+  // Every field on a Surge proxy line is comma-separated and confined
+  // to that line: a comma or newline smuggled in through a node link
+  // (password, path, host, uuid…) would otherwise forge extra fields
+  // or entire config lines — including fake [Proxy] entries.
+  return String(value ?? '').replace(/[\r\n,]+/g, ' ').trim();
+}
+
 function renderSurge(nodes, baseUrl, linkToken) {
   const proxies = nodes
     .filter((node) => node.type === 'vmess' || node.type === 'trojan')
     .map((node) => {
       if (node.type === 'vmess') {
-        return `${surgeName(node.name)} = vmess, ${node.server}, ${node.port}, username=${node.uuid}, ws=true, ws-path=${node.path || '/'}, ws-headers=Host:${node.host || ''}, tls=${node.tls ? 'true' : 'false'}, sni=${node.sni || ''}`;
+        return `${surgeName(node.name)} = vmess, ${surgeField(node.server)}, ${surgeField(node.port)}, username=${surgeField(node.uuid)}, ws=true, ws-path=${surgeField(node.path || '/')}, ws-headers=Host:${surgeField(node.host || '')}, tls=${node.tls ? 'true' : 'false'}, sni=${surgeField(node.sni || '')}`;
       }
-      return `${surgeName(node.name)} = trojan, ${node.server}, ${node.port}, password=${node.password || ''}, sni=${node.sni || ''}`;
+      return `${surgeName(node.name)} = trojan, ${surgeField(node.server)}, ${surgeField(node.port)}, password=${surgeField(node.password || '')}, sni=${surgeField(node.sni || '')}`;
     });
 
   return [
@@ -881,6 +894,18 @@ async function handleGenerate(request, env, url) {
     namePrefix: body.namePrefix || '',
     keepOriginalHost: body.keepOriginalHost !== false,
   };
+
+  // The output is the full cartesian product; without a ceiling, a big
+  // pasted IP list (a normal thing to have) times a few dozen nodes
+  // would build a record past KV's 25 MB value limit and fail with an
+  // unexplained 500. Refuse early with the actual numbers instead.
+  const MAX_OUTPUT_NODES = 10000;
+  if (baseNodes.length * preferredEndpoints.length > MAX_OUTPUT_NODES) {
+    return json({
+      ok: false,
+      error: `节点与优选地址的组合过多：将生成 ${baseNodes.length * preferredEndpoints.length} 个节点，超过上限 ${MAX_OUTPUT_NODES} 个。请减少节点数量或优选地址数量。`,
+    }, 400);
+  }
 
   const nodes = buildNodes(baseNodes, preferredEndpoints, options);
   // Remember where the nodes came from BEFORE expansion overwrites the
