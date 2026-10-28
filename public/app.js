@@ -217,11 +217,14 @@ function adminToken() {
 }
 
 function subUrlFor(id, target, token) {
+  // `token` here is the entry's per-entry link token (item.linkToken),
+  // never the admin token: these URLs are meant to be copied and shared.
   const base = `${location.origin}/sub/${id}`;
   const q = new URLSearchParams();
   if (target) q.set('target', target);
-  q.set('token', token);
-  return `${base}?${q.toString()}`;
+  if (token) q.set('token', token);
+  const qs = q.toString();
+  return qs ? `${base}?${qs}` : base;
 }
 
 function nameKeyOf(item) {
@@ -464,18 +467,19 @@ function detailCard(prefix, key, icon, title, desc, url, wide = false) {
   </article>`;
 }
 
-function buildDetail(item, token) {
+function buildDetail(item) {
   const prefix = `d-${item.id}`;
+  const linkToken = item.linkToken || '';
   const detail = document.createElement('div');
   detail.className = 'entry-detail';
   detail.innerHTML = `
     <div class="sub-grid">
-      ${detailCard(prefix, 'auto', 'auto.svg', '自动识别', '适合支持自动识别的客户端', subUrlFor(item.id, '', token))}
-      ${detailCard(prefix, 'raw', 'v2rayn.svg', 'V2rayN', '适用于 V2rayN / v2rayNG', subUrlFor(item.id, 'raw', token))}
-      ${detailCard(prefix, 'clash', 'clash.svg', 'Clash', '适用于 Clash / Mihomo / Clash Verge', subUrlFor(item.id, 'clash', token))}
-      ${detailCard(prefix, 'rocket', 'shadowrocket.svg', 'Shadowrocket', '适用于 iPhone / iPad 小火箭', subUrlFor(item.id, 'raw', token))}
-      ${detailCard(prefix, 'plain', 'auto.svg', '明文链接', '逐行明文节点链接（非 Base64），打开即可看/复制', subUrlFor(item.id, 'plain', token))}
-      ${detailCard(prefix, 'surge', 'surge.svg', 'Surge', '适用于 Surge Profile 导入', subUrlFor(item.id, 'surge', token), true)}
+      ${detailCard(prefix, 'auto', 'auto.svg', '自动识别', '适合支持自动识别的客户端', subUrlFor(item.id, '', linkToken))}
+      ${detailCard(prefix, 'raw', 'v2rayn.svg', 'V2rayN', '适用于 V2rayN / v2rayNG', subUrlFor(item.id, 'raw', linkToken))}
+      ${detailCard(prefix, 'clash', 'clash.svg', 'Clash', '适用于 Clash / Mihomo / Clash Verge', subUrlFor(item.id, 'clash', linkToken))}
+      ${detailCard(prefix, 'rocket', 'shadowrocket.svg', 'Shadowrocket', '适用于 iPhone / iPad 小火箭', subUrlFor(item.id, 'raw', linkToken))}
+      ${detailCard(prefix, 'plain', 'auto.svg', '明文链接', '逐行明文节点链接（非 Base64），打开即可看/复制', subUrlFor(item.id, 'plain', linkToken))}
+      ${detailCard(prefix, 'surge', 'surge.svg', 'Surge', '适用于 Surge Profile 导入', subUrlFor(item.id, 'surge', linkToken), true)}
     </div>
     <h3>明文节点链接（一行一个，可整段复制）</h3>
     <textarea id="${prefix}-plainText" rows="6" readonly placeholder="正在加载明文链接..."></textarea>
@@ -490,7 +494,7 @@ async function loadPlainOnce(detail, item) {
   detail.dataset.plainLoaded = '1';
   const box = detail.querySelector('textarea');
   try {
-    const resp = await fetch(subUrlFor(item.id, 'plain', adminToken()));
+    const resp = await fetch(subUrlFor(item.id, 'plain', item.linkToken || ''));
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     box.value = await resp.text();
   } catch (e) {
@@ -506,7 +510,7 @@ async function setDetail(entry, expand) {
   let detail = entry.querySelector('.entry-detail');
   if (expand) {
     if (!detail) {
-      detail = buildDetail(item, adminToken());
+      detail = buildDetail(item);
       entry.appendChild(detail);
     }
     detail.classList.remove('hidden');

@@ -4,7 +4,9 @@
 // - KV namespace binding: SUB_STORE
 // - Secret/Variable: SUB_ACCESS_TOKEN
 // Optional:
-// - Secret/Variable: SUB_LINK_SECRET (legacy long-token compatibility)
+// Subscription links carry a per-entry HMAC link token derived from
+// SUB_ACCESS_TOKEN (see linkTokenFor): the admin secret itself never
+// appears in any link, so sharing a subscription cannot leak admin access.
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data, null, 2), {
@@ -397,7 +399,7 @@ function renderClash(nodes) {
   ].join('\n');
 }
 
-function renderSurge(nodes, baseUrl, accessToken) {
+function renderSurge(nodes, baseUrl, linkToken) {
   const proxies = nodes
     .filter((node) => node.type === 'vmess' || node.type === 'trojan')
     .map((node) => {
@@ -425,7 +427,7 @@ function renderSurge(nodes, baseUrl, accessToken) {
     'FINAL,Proxy',
     '',
     '; token-protected subscription',
-    `; ${baseUrl}?token=${accessToken}`,
+    `; ${baseUrl}${linkToken ? `?token=${linkToken}` : ''}`,
   ].join('\n');
 }
 
@@ -660,12 +662,14 @@ async function handleGenerate(request, env, url) {
 
   const origin = url.origin;
   const accessToken = env.SUB_ACCESS_TOKEN || '';
-  const withToken = (target) =>
-    `${origin}/sub/${id}${
-      target
-        ? `?target=${target}&token=${encodeURIComponent(accessToken)}`
-        : `?token=${encodeURIComponent(accessToken)}`
-    }`;
+  const linkToken = await linkTokenFor(id, env);
+  const withToken = (target) => {
+    const q = new URLSearchParams();
+    if (target) q.set('target', target);
+    if (linkToken) q.set('token', linkToken);
+    const qs = q.toString();
+    return `${origin}/sub/${id}${qs ? `?${qs}` : ''}`;
+  };
 
   return json({
     ok: true,
@@ -760,6 +764,7 @@ async function handleList(request, env, url) {
           item.storage = rec.storage || { mode: 'permanent' };
         } catch {}
       }
+      item.linkToken = await linkTokenFor(id, env);
       items.push(item);
     }
     cursor = page.list_complete ? undefined : page.cursor;
@@ -866,6 +871,7 @@ async function handleEntry(request, env, url) {
     note: record.note || '',
     createdAt: record.createdAt || null,
     storage: record.storage || { mode: 'permanent' },
+    linkToken: await linkTokenFor(id, env),
     backfill: buildBackfill(record),
   });
 }
@@ -940,10 +946,40 @@ async function handleDelete(request, env) {
   return json({ ok: true, id, existed: Boolean(raw) });
 }
 
-function validateAccessToken(url, env) {
-  const expected = env.SUB_ACCESS_TOKEN;
-  if (!expected) return { ok: true };
+// ---- Per-entry subscription link tokens -----------------------------------
+// A subscription link is meant to be shared, so it must never carry the
+// admin secret. Instead the token in a /sub URL is an HMAC of the entry id
+// keyed by SUB_ACCESS_TOKEN: it opens exactly that one subscription, is
+// rejected by every admin endpoint, and cannot open other entries.
+// Rotating SUB_ACCESS_TOKEN invalidates every outstanding link token, so
+// previously shared links stop working until they are re-shared.
+let hmacKeyCache = { secret: null, promise: null };
+function linkTokenFor(id, env) {
+  const secret = env.SUB_ACCESS_TOKEN || '';
+  if (!secret) return Promise.resolve('');
+  if (hmacKeyCache.secret !== secret) {
+    hmacKeyCache = {
+      secret,
+      promise: crypto.subtle.importKey(
+        'raw',
+        new TextEncoder().encode(secret),
+        { name: 'HMAC', hash: 'SHA-256' },
+        false,
+        ['sign'],
+      ),
+    };
+  }
+  return hmacKeyCache.promise
+    .then((key) => crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`sub-link:${id}`)))
+    .then((sig) =>
+      [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, '0')).join('').slice(0, 32),
+    );
+}
+
+async function validateLinkToken(url, env, id) {
+  if (!env.SUB_ACCESS_TOKEN) return { ok: true };
   const provided = url.searchParams.get('token') || '';
+  const expected = await linkTokenFor(id, env);
   if (!provided || provided !== expected) {
     return { ok: false, response: text('Forbidden: invalid token', 403) };
   }
@@ -954,11 +990,11 @@ async function handleSub(url, env) {
   if (!env.SUB_STORE) {
     return text('Server error: SUB_STORE KV binding is missing. Add it in Pages Settings -> Bindings, then redeploy.', 500);
   }
-  const tokenCheck = validateAccessToken(url, env);
-  if (!tokenCheck.ok) return tokenCheck.response;
-
   const id = url.pathname.split('/').pop();
   if (!id) return text('missing id', 400);
+
+  const tokenCheck = await validateLinkToken(url, env, id);
+  if (!tokenCheck.ok) return tokenCheck.response;
 
   const raw = await env.SUB_STORE.get(`sub:${id}`);
   if (!raw) return text('not found', 404);
@@ -975,7 +1011,7 @@ async function handleSub(url, env) {
   }
   if (target === 'surge') {
     return text(
-      renderSurge(nodes, url.origin + url.pathname, env.SUB_ACCESS_TOKEN || ''),
+      renderSurge(nodes, url.origin + url.pathname, await linkTokenFor(id, env)),
       200,
       'text/plain; charset=utf-8',
     );

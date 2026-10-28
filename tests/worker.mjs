@@ -19,16 +19,22 @@ const env = {
   SUB_ACCESS_TOKEN: 'tok',
 };
 
+const linkTokens = new Map(); // entry id -> its per-entry link token
 async function generate(body) {
   const r = await worker.fetch(new Request('https://x.pages.dev/api/generate', {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
   }), env);
   const j = await r.json();
   assert.equal(j.ok, true, JSON.stringify(j));
+  if (j.shortId && j.urls) linkTokens.set(j.shortId, new URL(j.urls.auto).searchParams.get('token') || '');
   return j;
 }
-async function getSub(id, target) {
-  const r = await worker.fetch(new Request(`https://x.pages.dev/sub/${id}?target=${target}&token=tok`), env);
+async function getSub(id, target, tokenOverride) {
+  const token = tokenOverride !== undefined ? tokenOverride : linkTokens.get(id);
+  const q = new URLSearchParams();
+  if (target) q.set('target', target);
+  if (token) q.set('token', token);
+  const r = await worker.fetch(new Request(`https://x.pages.dev/sub/${id}?${q}`), env);
   return { status: r.status, body: await r.text() };
 }
 
@@ -133,7 +139,7 @@ console.log('worker tests passed');
   assert.equal(store.has(`sub:${g.shortId}`), false);
   assert.equal(store.has(`note:主力美国 VPS:${g.shortId}`), false);
   assert.equal(store.has(myDedupKey), false, 'dedup key removed');
-  const gone = await worker.fetch(new Request(`https://x.pages.dev/sub/${g.shortId}?token=tok`), env);
+  const gone = await worker.fetch(new Request(`https://x.pages.dev/sub/${g.shortId}?token=${linkTokens.get(g.shortId)}`), env);
   assert.equal(gone.status, 404);
   console.log('permanent storage, notes, pointers, admin list/note/delete, legacy migration: all passed');
 }
@@ -359,4 +365,47 @@ console.log('worker tests passed');
   assert.equal(big.preview.length, 30, 'preview lists every generated node');
   assert.equal(big.preview[29].name.endsWith('| 30'), true, 'last preview row is the 30th node');
   console.log('preview suite: all 30 nodes previewed, no 20-cap');
+}
+
+// --- Link token suite: sharing a subscription must not leak admin access ---
+{
+  const linkTokA = linkTokens.get(j1.shortId);
+  assert.match(linkTokA, /^[0-9a-f]{32}$/, 'link token is a 32-hex HMAC prefix');
+  assert.notEqual(linkTokA, 'tok');
+  assert.ok(!j1.urls.auto.includes('token=tok'), 'generated urls never carry the admin token');
+  assert.equal(new URL(j1.urls.auto).searchParams.get('token'), linkTokA);
+
+  // The admin token itself no longer opens a subscription; neither does a
+  // missing token, nor ANOTHER entry's link token.
+  assert.equal((await getSub(j1.shortId, 'raw', 'tok')).status, 403, 'admin token must not open /sub');
+  assert.equal((await getSub(j1.shortId, 'raw', '')).status, 403, 'missing link token 403');
+  const jB = await generate({ nodeLinks: node, preferredIps: '198.51.100.23', namePrefix: 'B' });
+  const linkTokB = linkTokens.get(jB.shortId);
+  assert.ok(linkTokB && linkTokB !== linkTokA, 'each entry gets its own link token');
+  assert.equal((await getSub(jB.shortId, 'raw', linkTokA)).status, 403, "entry A's link token must not open entry B");
+  assert.equal((await getSub(jB.shortId, 'raw')).status, 200, 'entry B opens with its own link token');
+
+  // A link token is worthless at the admin endpoints.
+  const listByLink = await worker.fetch(new Request(`https://x.pages.dev/api/list?token=${linkTokA}`), env);
+  assert.equal(listByLink.status, 403, 'link token must not list entries');
+  const noteByLink = await worker.fetch(new Request('https://x.pages.dev/api/note', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ id: j1.shortId, note: 'pwned', token: linkTokA }),
+  }), env);
+  assert.equal(noteByLink.status, 403, 'link token must not modify entries');
+
+  // The admin-authenticated reads hand the frontend each entry's link
+  // token, matching the token in the generated urls.
+  const lr = await (await worker.fetch(new Request('https://x.pages.dev/api/list?token=tok'), env)).json();
+  const itemA = lr.items.find((i) => i.id === j1.shortId);
+  assert.equal(itemA.linkToken, linkTokA, 'list item carries the same link token');
+  const er = await (await worker.fetch(new Request(`https://x.pages.dev/api/entry?id=${j1.shortId}&token=tok`), env)).json();
+  assert.equal(er.linkToken, linkTokA, 'entry read carries the same link token');
+
+  // Surge output embeds the per-entry link token, never the admin token.
+  const surge = await getSub(j1.shortId, 'surge');
+  assert.equal(surge.status, 200);
+  assert.ok(surge.body.includes(`?token=${linkTokA}`), 'surge profile carries the link token');
+  assert.ok(!surge.body.includes('token=tok'), 'surge profile must not contain the admin token');
+  console.log('link token suite: per-entry tokens, admin token rejected at /sub, link token rejected at admin: passed');
 }
