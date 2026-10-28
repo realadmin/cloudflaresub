@@ -126,6 +126,7 @@ textarea,
 input[type="text"],
 input[type="password"],
 input[type="number"],
+input[type="search"],
 select,
 input[readonly] {
   width: 100%;
@@ -154,6 +155,7 @@ textarea:focus,
 input[type="text"]:focus,
 input[type="password"]:focus,
 input[type="number"]:focus,
+input[type="search"]:focus,
 select:focus,
 input[readonly]:focus {
   border-color: rgba(96, 165, 250, 0.72);
@@ -644,6 +646,8 @@ button.small {
   width: auto;
   flex: 1 1 200px;
   max-width: 420px;
+  -webkit-appearance: none;
+  appearance: none;
 }
 .toolbar-spacer {
   flex: 1;
@@ -778,11 +782,16 @@ button.small {
 }
 
 /* Note editor: a tall multi-line box. Long notes wrap, and overflow scrolls
-   inside the box (mouse wheel / dragged scrollbar / touch swipe). */
+   inside the box (mouse wheel / dragged scrollbar / touch swipe). The box
+   stretches to the full entry-row height (driven by the actions column),
+   so it grows/shrinks with the buttons instead of a fixed pixel height. */
+.entry-row .cell:first-child {
+  align-self: stretch;
+}
 #adminSection .note-input {
   width: 100%;
   min-width: 0;
-  height: 98px;
+  height: 100%;
   min-height: 98px;
   padding: 10px 12px;
   font-size: 0.92rem;
@@ -832,6 +841,7 @@ label {
   input[type="text"],
   input[type="password"],
   input[type="number"],
+  input[type="search"],
   select,
   textarea {
     font-size: 16px;
@@ -859,7 +869,7 @@ label {
 
   #adminSection .note-input {
     font-size: 16px;
-    height: 112px;
+    height: 100%;
     min-height: 112px;
   }
 }
