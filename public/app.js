@@ -200,10 +200,11 @@ const adminMsg = document.getElementById('adminMsg');
 const adminBody = document.getElementById('adminBody');
 const listBtn = document.getElementById('listBtn');
 const sortSelect = document.getElementById('sortSelect');
+const adminSearchInput = document.getElementById('adminSearch');
 const expandAllBtn = document.getElementById('expandAllBtn');
 const collapseAllBtn = document.getElementById('collapseAllBtn');
 const adminItems = new Map();
-const adminState = { items: [], sort: 'created-desc' };
+const adminState = { items: [], sort: 'created-desc', query: '' };
 
 if (adminTokenInput && sessionStorage.getItem('cfsub_admin_token')) {
   adminTokenInput.value = sessionStorage.getItem('cfsub_admin_token');
@@ -264,6 +265,26 @@ function sortedAdminItems() {
   return items;
 }
 
+function itemMatchesQuery(item, needle) {
+  if (!needle) return true;
+  if ((item.note || '').toLowerCase().includes(needle)) return true;
+  return (item.sources || []).some((s) => String(s).toLowerCase().includes(needle));
+}
+
+function visibleAdminItems() {
+  const needle = (adminState.query || '').trim().toLowerCase();
+  return sortedAdminItems().filter((item) => itemMatchesQuery(item, needle));
+}
+
+function updateAdminCount() {
+  const total = adminState.items.length;
+  if (!(adminState.query || '').trim()) {
+    adminMsg.textContent = `共 ${total} 条。`;
+    return;
+  }
+  adminMsg.textContent = `共 ${total} 条，搜索到 ${visibleAdminItems().length} 条。`;
+}
+
 function retentionHtml(item) {
   const st = item.storage || { mode: 'permanent' };
   return st.mode === 'days'
@@ -278,8 +299,13 @@ function renderAdminList() {
     adminBody.innerHTML = '<div class="admin-empty">KV 里还没有任何条目。</div>';
     return;
   }
+  const visible = visibleAdminItems();
+  if (!visible.length) {
+    adminBody.innerHTML = '<div class="admin-empty">没有符合搜索条件的条目。</div>';
+    return;
+  }
   const token = adminToken();
-  adminBody.innerHTML = sortedAdminItems()
+  adminBody.innerHTML = visible
     .map((item) => {
       const created = item.createdAt ? new Date(item.createdAt).toLocaleString('zh-CN', { hour12: false }) : '-';
       const retention = retentionHtml(item);
@@ -320,7 +346,7 @@ async function loadAdminList() {
     if (!resp.ok || !data.ok) throw new Error(data.error || '加载失败');
     adminState.items = data.items || [];
     renderAdminList();
-    adminMsg.textContent = `共 ${adminState.items.length} 条。`;
+    updateAdminCount();
   } catch (e) {
     adminMsg.textContent = e.message || '加载失败';
   }
@@ -331,6 +357,13 @@ if (sortSelect) {
   sortSelect.addEventListener('change', () => {
     adminState.sort = sortSelect.value;
     renderAdminList();
+  });
+}
+if (adminSearchInput) {
+  adminSearchInput.addEventListener('input', () => {
+    adminState.query = adminSearchInput.value;
+    renderAdminList();
+    updateAdminCount();
   });
 }
 
