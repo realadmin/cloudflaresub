@@ -295,6 +295,20 @@ button.small {
   border: 1px solid rgba(148, 163, 184, 0.14);
 }
 
+/* Node preview: ALL generated nodes are rendered, but the box keeps the
+   height it used to have at 20 rows (header + 20 x ~46px) and scrolls
+   internally; the header row sticks while scrolling. */
+.table-wrap.preview-scroll {
+  max-height: 968px;
+  overflow-y: auto;
+}
+.table-wrap.preview-scroll thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: rgb(30, 41, 59);
+}
+
 .table-wrap table {
   width: 100%;
   border-collapse: collapse;
@@ -831,6 +845,11 @@ label {
   .table-wrap td {
     padding-top: 16px;
     padding-bottom: 16px;
+  }
+
+  /* Taller touch rows: the preview cap grows to match 20 of them. */
+  .table-wrap.preview-scroll {
+    max-height: 1134px;
   }
 
   #adminSection .note-input {

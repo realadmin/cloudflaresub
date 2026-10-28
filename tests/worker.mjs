@@ -349,3 +349,14 @@ console.log('worker tests passed');
   assert.equal(e5.status, 404, 'deleted entry reads 404');
   console.log('backfill suite: exact, reconstruction, round-trips, null case, delete cleanup passed');
 }
+
+// --- Preview suite: ALL generated nodes are previewed, not just 20 ---
+{
+  const eps = Array.from({ length: 15 }, (_, i) => `10.0.0.${i + 1}`).join('\n');
+  const vmessLink = 'vmess://ewogICJ2IjogIjIiLAogICJwcyI6ICJkZW1vIiwKICAiYWRkIjogImVkZ2UuZXhhbXBsZS5jb20iLAogICJwb3J0IjogIjQ0MyIsCiAgImlkIjogIjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMSIsCiAgInNjeSI6ICJhdXRvIiwKICAibmV0IjogIndzIiwKICAidGxzIjogInRscyIsCiAgInBhdGgiOiAiL3dzIiwKICAiaG9zdCI6ICJlZGdlLmV4YW1wbGUuY29tIiwKICAic25pIjogImVkZ2UuZXhhbXBsZS5jb20iCn0=';
+  const big = await generate({ nodeLinks: `${node}\n${vmessLink}`, preferredIps: eps });
+  assert.equal(big.counts.outputNodes, 30, 'fixture really generates 30 nodes');
+  assert.equal(big.preview.length, 30, 'preview lists every generated node');
+  assert.equal(big.preview[29].name.endsWith('| 30'), true, 'last preview row is the 30th node');
+  console.log('preview suite: all 30 nodes previewed, no 20-cap');
+}

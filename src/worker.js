@@ -688,7 +688,7 @@ async function handleGenerate(request, env, url) {
       preferredEndpoints: preferredEndpoints.length,
       outputNodes: nodes.length,
     },
-    preview: nodes.slice(0, 20).map((node) => ({
+    preview: nodes.map((node) => ({
       name: node.name,
       type: node.type,
       server: node.server,
