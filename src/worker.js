@@ -336,7 +336,7 @@ function parseSourceLimit(value) {
 // caches the answer in KV (6h for a hit, 30min for a failure), so the
 // public endpoint costs a handful of GitHub calls a day at most and
 // quietly degrades to "current version only" when GitHub is unreachable.
-const APP_VERSION = '1.3.0';
+const APP_VERSION = '1.4.0';
 const UPDATE_REPO = 'realadmin/cloudflaresub';
 const VERSION_CACHE_KEY = 'sys:latest-release';
 const VERSION_CACHE_MS = 6 * 60 * 60 * 1000;
