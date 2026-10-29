@@ -328,6 +328,86 @@ function parseSourceLimit(value) {
   return Math.min(100, Math.max(1, Math.trunc(n)));
 }
 
+// ---- Version / update check ----------------------------------------------
+// APP_VERSION is this build's version: bump it in the SAME release commit
+// as package.json's version field (the deployed site has no other way to
+// know its own version — package.json is not part of the upload package).
+// The update check asks GitHub for UPDATE_REPO's latest release and
+// caches the answer in KV (6h for a hit, 30min for a failure), so the
+// public endpoint costs a handful of GitHub calls a day at most and
+// quietly degrades to "current version only" when GitHub is unreachable.
+const APP_VERSION = '1.3.0';
+const UPDATE_REPO = 'realadmin/cloudflaresub';
+const VERSION_CACHE_KEY = 'sys:latest-release';
+const VERSION_CACHE_MS = 6 * 60 * 60 * 1000;
+const VERSION_NEGATIVE_MS = 30 * 60 * 1000;
+
+function compareVersions(a, b) {
+  const pa = String(a).replace(/^v/, '').split('.').map((n) => parseInt(n, 10) || 0);
+  const pb = String(b).replace(/^v/, '').split('.').map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] || 0) - (pb[i] || 0);
+    if (d !== 0) return d > 0 ? 1 : -1;
+  }
+  return 0;
+}
+
+async function getLatestRelease(env) {
+  let cached = null;
+  try {
+    const raw = await env.SUB_STORE.get(VERSION_CACHE_KEY);
+    if (raw) cached = JSON.parse(raw);
+  } catch {}
+  const now = Date.now();
+  if (cached) {
+    const freshFor = cached.tag ? VERSION_CACHE_MS : VERSION_NEGATIVE_MS;
+    if (now - (cached.checkedAt || 0) < freshFor) return cached.tag ? cached : null;
+  }
+  try {
+    const resp = await fetch(`https://api.github.com/repos/${UPDATE_REPO}/releases/latest`, {
+      headers: { 'user-agent': 'cloudflaresub (update check)', accept: 'application/vnd.github+json' },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!resp.ok) throw new Error(`GitHub HTTP ${resp.status}`);
+    const data = await resp.json();
+    const tag = String(data.tag_name || '').replace(/^v/, '');
+    if (!tag) throw new Error('GitHub response has no tag_name');
+    const fresh = {
+      tag,
+      url: data.html_url || `https://github.com/${UPDATE_REPO}/releases`,
+      checkedAt: now,
+    };
+    try { await env.SUB_STORE.put(VERSION_CACHE_KEY, JSON.stringify(fresh)); } catch {}
+    return fresh;
+  } catch {
+    // A stale answer beats no answer (the badge must not flap): serve
+    // it, but push its freshness out by only the negative window so an
+    // outage does not turn into a GitHub fetch per page view either.
+    if (cached && cached.tag) {
+      try {
+        await env.SUB_STORE.put(VERSION_CACHE_KEY, JSON.stringify({
+          ...cached,
+          checkedAt: now - VERSION_CACHE_MS + VERSION_NEGATIVE_MS,
+        }));
+      } catch {}
+      return cached;
+    }
+    try { await env.SUB_STORE.put(VERSION_CACHE_KEY, JSON.stringify({ tag: '', checkedAt: now })); } catch {}
+    return null;
+  }
+}
+
+async function handleVersion(request, env) {
+  const latest = env.SUB_STORE ? await getLatestRelease(env) : null;
+  return json({
+    ok: true,
+    version: APP_VERSION,
+    latest: latest ? latest.tag : null,
+    updateAvailable: latest ? compareVersions(latest.tag, APP_VERSION) > 0 : false,
+    releaseUrl: latest ? latest.url : `https://github.com/${UPDATE_REPO}/releases`,
+  });
+}
+
 function parseVmess(link) {
   const raw = link.slice('vmess://'.length).trim();
   const obj = JSON.parse(b64DecodeUtf8(raw));
@@ -1469,6 +1549,10 @@ export default {
 
       if (request.method === 'POST' && url.pathname === '/api/generate') {
         return await handleGenerate(request, env, url);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/version') {
+        return await handleVersion(request, env);
       }
 
       if (request.method === 'GET' && url.pathname === '/api/list') {

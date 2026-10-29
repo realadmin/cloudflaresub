@@ -749,6 +749,31 @@ button.small {
 }
 
 /* ---- Back-to-top round button ---- */
+.site-footer {
+  width: min(1120px, calc(100% - 32px));
+  margin: 0 auto 40px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.update-badge {
+  display: inline-block;
+  margin-left: 10px;
+  padding: 3px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(96, 165, 250, 0.55);
+  background: rgba(59, 130, 246, 0.14);
+  color: #93c5fd;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.update-badge:hover {
+  background: rgba(59, 130, 246, 0.25);
+  color: #bfdbfe;
+}
+
 .back-top {
   position: fixed;
   right: 22px;

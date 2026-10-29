@@ -904,3 +904,26 @@ if (backTopBtn) {
     window.scrollTo({ top: 0, behavior: reduce ? 'auto' : 'smooth' });
   });
 }
+
+// ---------------- Footer: current version + update check -------------------
+(async () => {
+  const info = document.getElementById('versionInfo');
+  if (!info) return;
+  try {
+    const resp = await fetch('/api/version');
+    const data = await resp.json().catch(() => null);
+    if (!data || !data.version) return;
+    info.textContent = `cloudflaresub v${data.version}`;
+    if (data.updateAvailable && data.latest) {
+      const badge = document.getElementById('updateBadge');
+      if (badge) {
+        badge.textContent = `有新版本 v${data.latest} →`;
+        badge.href = data.releaseUrl || '#';
+        badge.classList.remove('hidden');
+      }
+    }
+  } catch {
+    // The footer version is a nicety: any failure leaves the plain
+    // product name that the HTML already carries.
+  }
+})();

@@ -641,3 +641,70 @@ console.log('worker tests passed');
   assert.equal(atCap.counts.outputNodes, 10000, 'exactly at the cap succeeds');
   console.log('audit round 3 suite: output-format injection sealed, output cap enforced: passed');
 }
+
+// --- Version suite: /api/version reporting + update check caching ---
+{
+  const realFetch = globalThis.fetch;
+  let ghCalls = 0;
+  let ghTag = null;
+  let ghDown = false;
+  globalThis.fetch = async (url) => {
+    if (String(url).includes('api.github.com/')) {
+      ghCalls++;
+      if (ghDown) throw new Error('github down');
+      return new Response(JSON.stringify({ tag_name: ghTag, html_url: 'https://example.com/rel' }), { status: 200 });
+    }
+    throw new Error('unexpected fetch ' + url);
+  };
+  const getVersion = () => worker.fetch(new Request('https://x.pages.dev/api/version'), env).then((r) => r.json());
+  try {
+    const v0 = await getVersion();
+    assert.match(v0.version, /^\d+\.\d+\.\d+$/, 'endpoint reports the running version');
+    store.delete('sys:latest-release'); // v0 ran with no tag set: drop its negative cache entry
+    const newer = 'v' + (parseInt(v0.version, 10) + 1) + '.0.0';
+    ghTag = newer;
+    const v1 = await getVersion();
+    assert.equal(v1.latest, newer.slice(1), 'latest comes from GitHub');
+    assert.equal(v1.updateAvailable, true, 'newer release detected');
+    assert.equal(v1.releaseUrl, 'https://example.com/rel');
+    const callsAfterFirst = ghCalls;
+    const v2 = await getVersion();
+    assert.equal(v2.latest, v1.latest, 'second read served from KV cache');
+    assert.equal(ghCalls, callsAfterFirst, 'GitHub not re-queried inside the cache window');
+
+    store.delete('sys:latest-release');
+    ghTag = 'v' + v0.version;
+    assert.equal((await getVersion()).updateAvailable, false, 'same version is not an update');
+    store.delete('sys:latest-release');
+    ghTag = 'v0.0.1';
+    assert.equal((await getVersion()).updateAvailable, false, 'older release is not an update');
+
+    // GitHub down + stale positive cache: last known answer still served,
+    // and the retry is throttled instead of fetching per page view.
+    store.delete('sys:latest-release');
+    ghTag = newer;
+    await getVersion();
+    const staleEntry = JSON.parse(store.get('sys:latest-release').value);
+    staleEntry.checkedAt = Date.now() - 7 * 3600e3;
+    store.set('sys:latest-release', { value: JSON.stringify(staleEntry) });
+    ghDown = true;
+    const vDown = await getVersion();
+    assert.equal(vDown.latest, newer.slice(1), 'stale cache beats a GitHub outage');
+    const callsDuringOutage = ghCalls;
+    await getVersion();
+    assert.equal(ghCalls, callsDuringOutage, 'stale-serving throttles outage retries');
+
+    // GitHub down + no cache at all: current version only, negatively cached.
+    store.delete('sys:latest-release');
+    const vNone = await getVersion();
+    assert.equal(vNone.latest, null);
+    assert.equal(vNone.updateAvailable, false);
+    assert.equal(vNone.version, v0.version);
+    const callsAfterOutage = ghCalls;
+    await getVersion();
+    assert.equal(ghCalls, callsAfterOutage, 'outage is negatively cached');
+    console.log('version suite: report, compare, KV cache, stale + negative degradation: passed');
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+}
