@@ -1,12 +1,10 @@
-// Cloudflare Pages (_worker.js, advanced mode): KV short link subscription + access token protection
-// Also usable as a plain Worker entry (src/worker.js is kept in sync).
-// Requires:
-// - KV namespace binding: SUB_STORE
-// - Secret/Variable: SUB_ACCESS_TOKEN
-// Optional:
+// Cloudflare Pages (_worker.js, advanced mode): KV short-link
+// subscriptions + access-token protection. Also usable as a plain
+// Worker entry (src/worker.js is kept in sync).
+// Requires: KV binding SUB_STORE; secret/variable SUB_ACCESS_TOKEN.
 // Subscription links carry a per-entry HMAC link token derived from
 // SUB_ACCESS_TOKEN (see linkTokenFor): the admin secret itself never
-// appears in any link, so sharing a subscription cannot leak admin access.
+// appears in any link, so sharing a link cannot leak admin access.
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data, null, 2), {
@@ -107,8 +105,8 @@ function parsePreferredEndpoints(input) {
 // public CloudflareSpeedTest-style publication) instead of a fixed
 // snapshot: /sub responses are rebuilt from the source's latest list.
 // The list is cached in KV for an hour; a failed refresh falls back to
-// the stale cache, and ultimately to the snapshot stored on the entry,
-// so a dead source never takes existing subscriptions down with it.
+// the stale cache, then to the entry's snapshot, so a dead source never
+// takes existing subscriptions down with it.
 const IP_SOURCE_FRESH_MS = 60 * 60 * 1000;
 const IP_SOURCE_RETRY_MS = 5 * 60 * 1000;
 const IP_SOURCE_MAX_BYTES = 512 * 1024;
@@ -147,10 +145,9 @@ function assertSourceUrl(raw) {
 
 function extractEndpointTokens(text) {
   // One candidate endpoint per line, however the source formats it:
-  // plain txt (one IP per line), CSV speed-test results (endpoint in the
-  // first cell), or stray text around the addresses. A speed-test CSV's
-  // separate port column is not picked up — endpoints fall back to the
-  // node's own port, which is the common case for these lists.
+  // plain txt, CSV speed-test results (endpoint in the first cell), or
+  // stray text around the addresses. A CSV's separate port column is
+  // not picked up — endpoints fall back to the node's own port.
   const tokens = [];
   const re = /\[([0-9a-fA-F:]+)\](?::(\d{1,5}))?|(\d{1,3}(?:\.\d{1,3}){3})(?::(\d{1,5}))?|\b((?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,})(?::(\d{1,5}))?/;
   const lines = String(text).split(/\r?\n/);
@@ -281,9 +278,8 @@ async function writeIpCache(env, url, cache) {
   await env.SUB_STORE.put(`ipcache:${await sha256Hex(url)}`, JSON.stringify(cache));
 }
 
-// Endpoints for a source URL, preferring a fresh KV cache, then a live
-// fetch, then the stale cache. Throws only when there is nothing usable
-// at all (no cache and the fetch failed / returned nothing).
+// Endpoints for a source URL: fresh KV cache, then a live fetch, then
+// the stale cache. Throws only when there is nothing usable at all.
 async function getSourceEndpoints(env, rawUrl, now = Date.now()) {
   const url = assertSourceUrl(rawUrl);
   const cached = await readIpCache(env, url);
@@ -334,10 +330,9 @@ function parseSourceLimit(value) {
 // know its own version — package.json is not part of the upload package).
 // The update check asks GitHub for UPDATE_REPO's latest release and
 // caches the answer in KV (6h for a hit, 30min for a failure), so the
-// public endpoint costs a handful of GitHub calls a day at most. The
-// endpoint reports an explicit checkStatus (ok / stale / failed) so the
-// page can warn visibly when GitHub could not be reached, instead of
-// mistaking "check failed" for "already up to date".
+// endpoint costs a handful of GitHub calls a day at most. It reports
+// an explicit checkStatus (ok / stale / failed) so the page can warn
+// visibly instead of mistaking "check failed" for "up to date".
 const APP_VERSION = '1.4.0';
 const UPDATE_REPO = 'realadmin/cloudflaresub';
 const VERSION_CACHE_KEY = 'sys:latest-release';
@@ -605,6 +600,15 @@ function renderRaw(nodes) {
   return b64EncodeUtf8(renderPlain(nodes));
 }
 
+function pushClashWsOpts(lines, node) {
+  lines.push(
+    `    ws-opts:`,
+    `      path: "${escapeYaml(node.path || '/')}"`,
+    `      headers:`,
+    `        Host: "${escapeYaml(node.host || node.sni || '')}"`
+  );
+}
+
 function renderClash(nodes) {
   const proxies = nodes
     .map((node) => {
@@ -627,12 +631,7 @@ function renderClash(nodes) {
         }
 
         if ((node.network || 'ws') === 'ws') {
-          lines.push(
-            `    ws-opts:`,
-            `      path: "${escapeYaml(node.path || '/')}"`,
-            `      headers:`,
-            `        Host: "${escapeYaml(node.host || node.sni || '')}"`
-          );
+          pushClashWsOpts(lines, node);
         }
 
         return lines.join('\n');
@@ -655,12 +654,7 @@ function renderClash(nodes) {
         }
 
         if ((node.network || 'ws') === 'ws') {
-          lines.push(
-            `    ws-opts:`,
-            `      path: "${escapeYaml(node.path || '/')}"`,
-            `      headers:`,
-            `        Host: "${escapeYaml(node.host || node.sni || '')}"`
-          );
+          pushClashWsOpts(lines, node);
         }
 
         return lines.join('\n');
@@ -689,12 +683,7 @@ function renderClash(nodes) {
         }
 
         if (node.network === 'ws') {
-          lines.push(
-            `    ws-opts:`,
-            `      path: "${escapeYaml(node.path || '/')}"`,
-            `      headers:`,
-            `        Host: "${escapeYaml(node.host || node.sni || '')}"`
-          );
+          pushClashWsOpts(lines, node);
         }
 
         return lines.join('\n');
@@ -1063,10 +1052,9 @@ async function handleGenerate(request, env, url) {
     await putRecord(env, id, record, undefined, ttl);
     await env.SUB_STORE.put(dedupKey, id, ttl ? { expirationTtl: ttl } : {});
   } else {
-    // Same content generated again: reuse the entry. Rewriting it without a
-    // TTL also migrates entries created by older versions (7-day expiry)
-    // to permanent storage, backfills sources, and applies a newly
-    // provided note.
+    // Same content generated again: reuse the entry. Rewriting it without
+    // a TTL also migrates older (7-day expiry) entries to permanent
+    // storage, backfills sources, and applies a newly provided note.
     const raw = await env.SUB_STORE.get(`sub:${id}`);
     if (raw) {
       record = JSON.parse(raw);
@@ -1200,11 +1188,10 @@ async function handleList(request, env, url) {
   const denied = await checkAdmin(request, env, url, null);
   if (denied) return denied;
 
-  // The key list only tells us WHICH entries exist. Every displayed field
-  // (note, storage plan, ...) is read from the record itself: the list
-  // index's metadata lags behind fresh writes, which first made write
-  // verification report false failures, then made this list show stale
-  // plans right after a verified change. One source of truth: the record.
+  // The key list only tells us WHICH entries exist. Every displayed
+  // field is read from the record itself: list-index metadata lags
+  // fresh writes and caused false failure reports and stale displays.
+  // One source of truth: the record.
   const items = [];
   let cursor;
   do {
@@ -1253,13 +1240,12 @@ async function handleList(request, env, url) {
 }
 
 // ---- Form backfill -------------------------------------------------------
-// The generate form's inputs for an existing entry, so the owner can load
-// the entry back into the form and edit it. Newer records store the raw
-// inputs verbatim (exact). Older records are reconstructed from their
-// expanded nodes: generation laid nodes out as sources x endpoints, so
-// source i's original node is its first expanded node with the preferred
-// server/port/name swapped back for the source's own, and the preferred
-// list is rebuilt per endpoint position.
+// The generate form's inputs for an existing entry, for form backfill.
+// Newer records store the raw inputs verbatim (exact). Older records
+// are reconstructed from their expanded nodes: generation laid nodes
+// out as sources x endpoints, so a source's original node is its first
+// expanded node with the source's own server/port/name swapped back,
+// and the preferred list is rebuilt per endpoint position.
 function nameTailOf(nodeName, sourceName, prefix) {
   let rest = String(nodeName || '');
   if (sourceName && rest.startsWith(`${sourceName} | `)) rest = rest.slice(sourceName.length + 3);
@@ -1342,10 +1328,9 @@ function buildBackfill(record) {
   return null;
 }
 
-// Direct single-record read for write verification. Deliberately NOT built
-// on KV list(): the list index lags behind fresh writes, which made the
-// UI's read-back check report false failures. A point get() reflects the
-// write promptly.
+// Direct single-record read for write verification. Deliberately NOT
+// built on KV list(): the list index lags fresh writes and made the
+// UI's read-back check report false failures; a point get() is prompt.
 async function handleEntry(request, env, url) {
   if (!env.SUB_STORE) return json({ ok: false, error: 'SUB_STORE KV 未绑定' }, 500);
   const denied = await checkAdmin(request, env, url, null);
@@ -1371,12 +1356,19 @@ async function handleEntry(request, env, url) {
 // address before generating a dynamic subscription from it. Always
 // fetches live (never the cache) and requires the admin token, like
 // every other server-side fetch trigger.
-async function handleIpSourceTest(request, env) {
-  if (!env.SUB_STORE) return json({ ok: false, error: 'SUB_STORE KV 未绑定' }, 500);
+// Shared prelude of the POST admin endpoints: KV bound, JSON body
+// parsed, admin token verified. Returns { body } or { error }.
+async function parseAdminBody(request, env) {
+  if (!env.SUB_STORE) return { error: json({ ok: false, error: 'SUB_STORE KV 未绑定' }, 500) };
   let body;
-  try { body = await request.json(); } catch { return json({ ok: false, error: '请求体不是合法 JSON' }, 400); }
+  try { body = await request.json(); } catch { return { error: json({ ok: false, error: '请求体不是合法 JSON' }, 400) }; }
   const denied = await checkAdmin(request, env, new URL(request.url), body);
-  if (denied) return denied;
+  return denied ? { error: denied } : { body };
+}
+
+async function handleIpSourceTest(request, env) {
+  const { body, error } = await parseAdminBody(request, env);
+  if (error) return error;
   try {
     const fresh = await fetchIpSource(String(body.url || ''));
     return json({
@@ -1394,11 +1386,8 @@ async function handleIpSourceTest(request, env) {
 }
 
 async function handleNote(request, env) {
-  if (!env.SUB_STORE) return json({ ok: false, error: 'SUB_STORE KV 未绑定' }, 500);
-  let body;
-  try { body = await request.json(); } catch { return json({ ok: false, error: '请求体不是合法 JSON' }, 400); }
-  const denied = await checkAdmin(request, env, new URL(request.url), body);
-  if (denied) return denied;
+  const { body, error } = await parseAdminBody(request, env);
+  if (error) return error;
 
   const id = String(body.id || '').trim();
   if (!id) return json({ ok: false, error: '缺少条目 id' }, 400);
@@ -1417,11 +1406,8 @@ async function handleNote(request, env) {
 }
 
 async function handleRetention(request, env) {
-  if (!env.SUB_STORE) return json({ ok: false, error: 'SUB_STORE KV 未绑定' }, 500);
-  let body;
-  try { body = await request.json(); } catch { return json({ ok: false, error: '请求体不是合法 JSON' }, 400); }
-  const denied = await checkAdmin(request, env, new URL(request.url), body);
-  if (denied) return denied;
+  const { body, error } = await parseAdminBody(request, env);
+  if (error) return error;
 
   const id = String(body.id || '').trim();
   if (!id) return json({ ok: false, error: '缺少条目 id' }, 400);
@@ -1445,11 +1431,8 @@ async function handleRetention(request, env) {
 }
 
 async function handleDelete(request, env) {
-  if (!env.SUB_STORE) return json({ ok: false, error: 'SUB_STORE KV 未绑定' }, 500);
-  let body;
-  try { body = await request.json(); } catch { return json({ ok: false, error: '请求体不是合法 JSON' }, 400); }
-  const denied = await checkAdmin(request, env, new URL(request.url), body);
-  if (denied) return denied;
+  const { body, error } = await parseAdminBody(request, env);
+  if (error) return error;
 
   const id = String(body.id || '').trim();
   if (!id) return json({ ok: false, error: '缺少条目 id' }, 400);
@@ -1465,11 +1448,10 @@ async function handleDelete(request, env) {
 
 // ---- Per-entry subscription link tokens -----------------------------------
 // A subscription link is meant to be shared, so it must never carry the
-// admin secret. Instead the token in a /sub URL is an HMAC of the entry id
-// keyed by SUB_ACCESS_TOKEN: it opens exactly that one subscription, is
+// admin secret. Instead the /sub token is an HMAC of the entry id keyed
+// by SUB_ACCESS_TOKEN: it opens exactly that one subscription, is
 // rejected by every admin endpoint, and cannot open other entries.
-// Rotating SUB_ACCESS_TOKEN invalidates every outstanding link token, so
-// previously shared links stop working until they are re-shared.
+// Rotating SUB_ACCESS_TOKEN invalidates all outstanding link tokens.
 let hmacKeyCache = { secret: null, promise: null };
 function linkTokenFor(id, env) {
   const secret = env.SUB_ACCESS_TOKEN || '';
@@ -1612,9 +1594,9 @@ export default {
         return json({ ok: false, error: '接口不存在' }, 404);
       }
 
-      // Pages (advanced mode) always provides the ASSETS binding.
-      // In a plain Worker deployment without an [assets] section this binding
-      // is undefined, and calling env.ASSETS.fetch() throws -> Cloudflare 1101.
+      // Pages (advanced mode) always provides the ASSETS binding. In a
+      // plain Worker without [assets] it is undefined, and calling
+      // env.ASSETS.fetch() throws -> Cloudflare 1101.
       if (env.ASSETS && typeof env.ASSETS.fetch === 'function') {
         return await env.ASSETS.fetch(request);
       }

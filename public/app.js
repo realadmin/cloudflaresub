@@ -1,22 +1,38 @@
-const form = document.getElementById('generator-form');
-const submitBtn = document.getElementById('submitBtn');
-const fillDemoBtn = document.getElementById('fillDemoBtn');
-const resultSection = document.getElementById('resultSection');
-const warningBox = document.getElementById('warningBox');
-const previewBody = document.getElementById('previewBody');
+// Small DOM / request shorthands used across the page.
+const byId = (id) => document.getElementById(id);
+function postJson(path, payload) {
+  return fetch(path, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+async function fetchEntry(id, token) {
+  const resp = await fetch('/api/entry?' + new URLSearchParams({ id }), {
+    headers: { 'x-admin-token': token },
+  });
+  return { resp, data: await resp.json().catch(() => null) };
+}
 
-const autoUrl = document.getElementById('autoUrl');
-const rawUrl = document.getElementById('rawUrl');
-const clashUrl = document.getElementById('clashUrl');
-const surgeUrl = document.getElementById('surgeUrl');
-const plainUrl = document.getElementById('plainUrl');
-const plainLinks = document.getElementById('plainLinks');
-const emptyState = document.getElementById('emptyState');
+const form = byId('generator-form');
+const submitBtn = byId('submitBtn');
+const fillDemoBtn = byId('fillDemoBtn');
+const resultSection = byId('resultSection');
+const warningBox = byId('warningBox');
+const previewBody = byId('previewBody');
 
-const qrModal = document.getElementById('qrModal');
-const qrCanvas = document.getElementById('qrCanvas');
-const qrText = document.getElementById('qrText');
-const closeQrModal = document.getElementById('closeQrModal');
+const autoUrl = byId('autoUrl');
+const rawUrl = byId('rawUrl');
+const clashUrl = byId('clashUrl');
+const surgeUrl = byId('surgeUrl');
+const plainUrl = byId('plainUrl');
+const plainLinks = byId('plainLinks');
+const emptyState = byId('emptyState');
+
+const qrModal = byId('qrModal');
+const qrCanvas = byId('qrCanvas');
+const qrText = byId('qrText');
+const closeQrModal = byId('closeQrModal');
 
 const demoVmess = [
   'vmess://ewogICJ2IjogIjIiLAogICJwcyI6ICJkZW1vLXdzLXRscyIsCiAgImFkZCI6ICJlZGdlLmV4YW1wbGUuY29tIiwKICAicG9ydCI6ICI0NDMiLAogICJpZCI6ICIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLAogICJzY3kiOiAiYXV0byIsCiAgIm5ldCI6ICJ3cyIsCiAgInRscyI6ICJ0bHMiLAogICJwYXRoIjogIi93cyIsCiAgImhvc3QiOiAiZWRnZS5leGFtcGxlLmNvbSIsCiAgInNuaSI6ICJlZGdlLmV4YW1wbGUuY29tIiwKICAiZnAiOiAiY2hyb21lIiwKICAiYWxwbiI6ICJoMixodHRwLzEuMSIKfQ=='
@@ -29,19 +45,19 @@ const demoIps = [
 ].join('\n');
 
 // ---------------- Preferred-IP source mode (manual / API dynamic) --------
-const ipModeSelect = document.getElementById('ipMode');
-const manualIpPanel = document.getElementById('manualIpPanel');
-const apiIpPanel = document.getElementById('apiIpPanel');
-const ipSourceUrlInput = document.getElementById('ipSourceUrl');
-const ipSourceLimitInput = document.getElementById('ipSourceLimit');
-const ipSourceMsg = document.getElementById('ipSourceMsg');
-const testIpSourceBtn = document.getElementById('testIpSourceBtn');
+const ipModeSelect = byId('ipMode');
+const manualIpPanel = byId('manualIpPanel');
+const apiIpPanel = byId('apiIpPanel');
+const ipSourceUrlInput = byId('ipSourceUrl');
+const ipSourceLimitInput = byId('ipSourceLimit');
+const ipSourceMsg = byId('ipSourceMsg');
+const testIpSourceBtn = byId('testIpSourceBtn');
 
 function syncIpMode() {
   const api = !!(ipModeSelect && ipModeSelect.value === 'api');
   if (manualIpPanel) manualIpPanel.classList.toggle('hidden', api);
   if (apiIpPanel) apiIpPanel.classList.toggle('hidden', !api);
-  const ta = document.getElementById('preferredIps');
+  const ta = byId('preferredIps');
   if (ta) ta.required = !api;
   if (ipSourceUrlInput) ipSourceUrlInput.required = api;
 }
@@ -64,11 +80,7 @@ if (testIpSourceBtn) {
     testIpSourceBtn.disabled = true;
     ipSourceMsg.textContent = '正在拉取…';
     try {
-      const resp = await fetch('/api/ip-source-test', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ url, token }),
-      });
+      const resp = await postJson('/api/ip-source-test', { url, token });
       const data = await resp.json().catch(() => null);
       if (!resp.ok || !data?.ok) throw new Error((data && data.error) || '拉取失败');
       ipSourceMsg.textContent = `拉取成功：共解析到 ${data.count} 个可用优选地址。前几个：${(data.sample || []).join('、')}`;
@@ -80,8 +92,8 @@ if (testIpSourceBtn) {
   });
 }
 
-const storageModeSelect = document.getElementById('storageMode');
-const retentionDaysInput = document.getElementById('retentionDays');
+const storageModeSelect = byId('storageMode');
+const retentionDaysInput = byId('retentionDays');
 if (storageModeSelect && retentionDaysInput) {
   storageModeSelect.addEventListener('change', () => {
     retentionDaysInput.disabled = storageModeSelect.value !== 'days';
@@ -93,10 +105,10 @@ fillDemoBtn.addEventListener('click', () => {
     ipModeSelect.value = 'manual';
     ipModeSelect.dispatchEvent(new Event('change', { bubbles: true }));
   }
-  document.getElementById('nodeLinks').value = demoVmess;
-  document.getElementById('preferredIps').value = demoIps;
-  document.getElementById('namePrefix').value = 'CF';
-  document.getElementById('keepOriginalHost').checked = true;
+  byId('nodeLinks').value = demoVmess;
+  byId('preferredIps').value = demoIps;
+  byId('namePrefix').value = 'CF';
+  byId('keepOriginalHost').checked = true;
 });
 
 form.addEventListener('submit', async (event) => {
@@ -105,32 +117,26 @@ form.addEventListener('submit', async (event) => {
   previewBody.innerHTML = '';
 
   const payload = {
-    nodeLinks: document.getElementById('nodeLinks').value,
-    preferredIps: document.getElementById('preferredIps').value,
+    nodeLinks: byId('nodeLinks').value,
+    preferredIps: byId('preferredIps').value,
     ipMode: ipModeSelect?.value || 'manual',
     sourceUrl: ipSourceUrlInput?.value || '',
     sourceLimit: Number(ipSourceLimitInput?.value || 10),
-    namePrefix: document.getElementById('namePrefix').value,
-    keepOriginalHost: document.getElementById('keepOriginalHost').checked,
+    namePrefix: byId('namePrefix').value,
+    keepOriginalHost: byId('keepOriginalHost').checked,
     // Generating writes to KV, so it carries the same admin token the
     // owner keeps in the admin section's token box below.
     token: adminToken(),
-    note: document.getElementById('subNote')?.value || '',
-    storageMode: document.getElementById('storageMode')?.value || 'permanent',
-    retentionDays: Number(document.getElementById('retentionDays')?.value || 30),
+    note: byId('subNote')?.value || '',
+    storageMode: byId('storageMode')?.value || 'permanent',
+    retentionDays: Number(byId('retentionDays')?.value || 30),
   };
 
   submitBtn.disabled = true;
   submitBtn.textContent = '生成中...';
 
   try {
-    const response = await fetch('/api/generate', {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify(payload),
-    });
+    const response = await postJson('/api/generate', payload);
 
     const data = await response.json();
     if (!response.ok || !data.ok) {
@@ -139,7 +145,7 @@ form.addEventListener('submit', async (event) => {
 
     autoUrl.value = data.urls.auto;
     rawUrl.value = data.urls.raw;
-    document.getElementById('rocketUrl').value = data.urls.raw;
+    byId('rocketUrl').value = data.urls.raw;
     clashUrl.value = data.urls.clash;
     surgeUrl.value = data.urls.surge;
     if (plainUrl) plainUrl.value = data.urls.plain || '';
@@ -149,9 +155,9 @@ form.addEventListener('submit', async (event) => {
 
     emptyState.classList.add('hidden');
 
-    document.getElementById('statInputNodes').textContent = data.counts.inputNodes;
-    document.getElementById('statEndpoints').textContent = data.counts.preferredEndpoints;
-    document.getElementById('statOutputNodes').textContent = data.counts.outputNodes;
+    byId('statInputNodes').textContent = data.counts.inputNodes;
+    byId('statEndpoints').textContent = data.counts.preferredEndpoints;
+    byId('statOutputNodes').textContent = data.counts.outputNodes;
 
     previewBody.innerHTML = data.preview
       .map(
@@ -191,7 +197,7 @@ form.addEventListener('submit', async (event) => {
 document.addEventListener('click', async (event) => {
   const copyButton = event.target.closest('[data-copy-target]');
   if (copyButton) {
-    const input = document.getElementById(copyButton.dataset.copyTarget);
+    const input = byId(copyButton.dataset.copyTarget);
     if (!input?.value) {
       return;
     }
@@ -213,7 +219,7 @@ document.addEventListener('click', async (event) => {
   if (qrButton) {
     warningBox.classList.add('hidden');
 
-    const input = document.getElementById(qrButton.dataset.qrcodeTarget);
+    const input = byId(qrButton.dataset.qrcodeTarget);
     if (!input?.value) {
       warningBox.textContent = '请先生成订阅链接，再显示二维码。';
       warningBox.classList.remove('hidden');
@@ -263,16 +269,16 @@ function escapeHtml(value) {
 }
 
 // ---------------- KV entry admin ----------------
-const adminTokenInput = document.getElementById('adminToken');
-const adminMsg = document.getElementById('adminMsg');
-const adminBody = document.getElementById('adminBody');
-const listBtn = document.getElementById('listBtn');
-const sortSelect = document.getElementById('sortSelect');
-const adminSearchInput = document.getElementById('adminSearch');
-const expandAllBtn = document.getElementById('expandAllBtn');
-const collapseAllBtn = document.getElementById('collapseAllBtn');
-const selectAllCheckbox = document.getElementById('selectAllEntries');
-const deleteSelectedBtn = document.getElementById('deleteSelectedBtn');
+const adminTokenInput = byId('adminToken');
+const adminMsg = byId('adminMsg');
+const adminBody = byId('adminBody');
+const listBtn = byId('listBtn');
+const sortSelect = byId('sortSelect');
+const adminSearchInput = byId('adminSearch');
+const expandAllBtn = byId('expandAllBtn');
+const collapseAllBtn = byId('collapseAllBtn');
+const selectAllCheckbox = byId('selectAllEntries');
+const deleteSelectedBtn = byId('deleteSelectedBtn');
 const adminItems = new Map();
 const adminState = { items: [], sort: 'created-desc', query: '', selected: new Set() };
 
@@ -495,10 +501,7 @@ if (deleteSelectedBtn) {
       const id = ids[k];
       let data = null;
       try {
-        const resp = await fetch('/api/delete', {
-          method: 'POST', headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ id, token }),
-        });
+        const resp = await postJson('/api/delete', { id, token });
         data = await resp.json().catch(() => null);
       } catch (e) {
         data = null;
@@ -621,10 +624,8 @@ async function pollEntry(id, token, predicate) {
   for (let attempt = 0; attempt < 6; attempt++) {
     if (attempt > 0) await new Promise((r) => setTimeout(r, 500));
     try {
-      const q = new URLSearchParams({ id });
-      const resp = await fetch(`/api/entry?${q.toString()}`, { headers: { 'x-admin-token': token } });
-      if (!resp.ok) continue;
-      const entry = await resp.json();
+      const { resp, data: entry } = await fetchEntry(id, token);
+      if (!resp.ok || !entry) continue;
       if (entry.ok && predicate(entry)) return entry;
     } catch {}
   }
@@ -636,7 +637,7 @@ async function pollEntry(id, token, predicate) {
 // new entry, unchanged content refreshes the same entry.
 function fillGenerateForm(bf) {
   const setValue = (id, value) => {
-    const el = document.getElementById(id);
+    const el = byId(id);
     if (el) el.value = value ?? '';
   };
   setValue('nodeLinks', bf.nodeLinks);
@@ -648,10 +649,10 @@ function fillGenerateForm(bf) {
   setValue('ipSourceUrl', bf.sourceUrl);
   if (bf.sourceLimit) setValue('ipSourceLimit', bf.sourceLimit);
   setValue('namePrefix', bf.namePrefix);
-  const keep = document.getElementById('keepOriginalHost');
+  const keep = byId('keepOriginalHost');
   if (keep) keep.checked = bf.keepOriginalHost !== false;
   setValue('subNote', bf.note);
-  const mode = document.getElementById('storageMode');
+  const mode = byId('storageMode');
   if (mode) {
     mode.value = bf.storage?.mode === 'days' ? 'days' : 'permanent';
     mode.dispatchEvent(new Event('change', { bubbles: true }));
@@ -674,9 +675,7 @@ document.addEventListener('click', async (event) => {
   if (action === 'backfill') {
     btn.disabled = true;
     try {
-      const q = new URLSearchParams({ id });
-      const resp = await fetch(`/api/entry?${q.toString()}`, { headers: { 'x-admin-token': token } });
-      const data = await resp.json().catch(() => null);
+      const { resp, data } = await fetchEntry(id, token);
       if (!resp.ok || !data?.ok) throw new Error((data && data.error) || '回填失败，请重试');
       if (!data.backfill) throw new Error('这条记录缺少可还原的数据，无法回填');
       fillGenerateForm(data.backfill);
@@ -707,10 +706,7 @@ document.addEventListener('click', async (event) => {
     let savedNote = rawNote;
     let errMsg = '';
     try {
-      const resp = await fetch('/api/note', {
-        method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ id, note: rawNote, token }),
-      });
+      const resp = await postJson('/api/note', { id, note: rawNote, token });
       const data = await resp.json();
       if (resp.ok && data.ok) {
         savedNote = typeof data.note === 'string' ? data.note : rawNote;
@@ -744,10 +740,7 @@ document.addEventListener('click', async (event) => {
     if (!confirm(`确定删除条目「${note}」吗？删除后它的订阅链接会立刻失效。`)) return;
     let data = null;
     try {
-      const resp = await fetch('/api/delete', {
-        method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ id, token }),
-      });
+      const resp = await postJson('/api/delete', { id, token });
       data = await resp.json();
     } catch (e) {
       data = null; // network failure / non-JSON error page: treat as failure
@@ -859,10 +852,7 @@ document.addEventListener('click', async (event) => {
   let ok = false;
   let newStorage = null;
   try {
-    const resp = await fetch('/api/retention', {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ id, token, mode, days: mode === 'days' ? days : undefined }),
-    });
+    const resp = await postJson('/api/retention', { id, token, mode, days: mode === 'days' ? days : undefined });
     const data = await resp.json();
     if (resp.ok && data.ok) {
       newStorage = data.storage;
@@ -899,7 +889,7 @@ document.addEventListener('click', async (event) => {
 });
 
 // ---------------- Back to top ----------------
-const backTopBtn = document.getElementById('backTopBtn');
+const backTopBtn = byId('backTopBtn');
 if (backTopBtn) {
   const onScroll = () => {
     backTopBtn.classList.toggle('show', window.scrollY > 400);
@@ -913,11 +903,11 @@ if (backTopBtn) {
 }
 
 // ------------- Header: current version + update check --------------------
-const versionStatusEl = document.getElementById('versionStatus');
-const versionUpdateLink = document.getElementById('versionUpdateLink');
-const versionAlertEl = document.getElementById('versionAlert');
-const versionAlertTextEl = document.getElementById('versionAlertText');
-const versionRetryBtn = document.getElementById('versionRetryBtn');
+const versionStatusEl = byId('versionStatus');
+const versionUpdateLink = byId('versionUpdateLink');
+const versionAlertEl = byId('versionAlert');
+const versionAlertTextEl = byId('versionAlertText');
+const versionRetryBtn = byId('versionRetryBtn');
 let versionCheckInFlight = false;
 
 function showVersionStatus(state, text) {
