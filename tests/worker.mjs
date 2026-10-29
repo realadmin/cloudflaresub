@@ -708,3 +708,15 @@ console.log('worker tests passed');
     globalThis.fetch = realFetch;
   }
 }
+
+// --- Audit round 4 suite: API namespace contract ---
+{
+  const wrongMethod = await worker.fetch(new Request('https://x.pages.dev/api/generate'), env);
+  assert.equal(wrongMethod.status, 404, 'GET on a POST-only API path is a JSON 404, not the homepage');
+  assert.equal((await wrongMethod.json()).ok, false);
+  const unknown = await worker.fetch(new Request('https://x.pages.dev/api/nonexistent', { method: 'POST' }), env);
+  assert.equal(unknown.status, 404, 'unknown API path is a JSON 404');
+  const home = await worker.fetch(new Request('https://x.pages.dev/'), env);
+  assert.equal(home.status, 200, 'non-API paths still reach the static site');
+  console.log('audit round 4 suite: unknown/wrong-method API paths return JSON 404: passed');
+}

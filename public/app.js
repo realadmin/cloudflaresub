@@ -375,10 +375,17 @@ function updateSelectionUI() {
   }
 }
 
+function retentionDaysText(st) {
+  // Days reach innerHTML in the retention cell/panel: coerce to a plain
+  // number so even a hand-corrupted record cannot inject markup there.
+  const n = Number(st && st.days);
+  return Number.isFinite(n) ? String(n) : '?';
+}
+
 function retentionHtml(item) {
   const st = item.storage || { mode: 'permanent' };
   return st.mode === 'days'
-    ? `${st.days ?? '?'} 天后删除<br><span class="hint">${st.expiresAt ? '到期：' + new Date(st.expiresAt).toLocaleString('zh-CN', { hour12: false }) : ''}</span>`
+    ? `${retentionDaysText(st)} 天后删除<br><span class="hint">${st.expiresAt ? '到期：' + new Date(st.expiresAt).toLocaleString('zh-CN', { hour12: false }) : ''}</span>`
     : '永久';
 }
 
@@ -767,7 +774,7 @@ function buildRetentionPanel(item) {
   const panel = document.createElement('div');
   panel.className = 'entry-retention hidden';
   const current = st.mode === 'days'
-    ? `${st.days ?? '?'} 天后删除${st.expiresAt ? '（到期：' + new Date(st.expiresAt).toLocaleString('zh-CN', { hour12: false }) + '）' : ''}`
+    ? `${retentionDaysText(st)} 天后删除${st.expiresAt ? '（到期：' + new Date(st.expiresAt).toLocaleString('zh-CN', { hour12: false }) + '）' : ''}`
     : '永久保存';
   panel.innerHTML = `
     <div class="ret-current">当前有效期：<strong>${escapeHtml(current)}</strong></div>
@@ -779,7 +786,7 @@ function buildRetentionPanel(item) {
         </select>
       </label>
       <label>天数
-        <input class="ret-days" type="number" min="1" max="3650" step="1" value="${st.mode === 'days' && st.days ? st.days : 30}"${st.mode !== 'days' ? ' disabled' : ''} />
+        <input class="ret-days" type="number" min="1" max="3650" step="1" value="${st.mode === 'days' && Number.isFinite(Number(st.days)) ? Number(st.days) : 30}"${st.mode !== 'days' ? ' disabled' : ''} />
       </label>
       <button type="button" class="secondary small" data-ret-save>保存有效期</button>
       <button type="button" class="secondary small" data-ret-cancel>取消</button>

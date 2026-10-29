@@ -1583,6 +1583,12 @@ export default {
         return await handleSub(request, env, url);
       }
 
+      // Unknown API paths (or wrong methods on known ones) get a JSON
+      // 404, not the HTML homepage from the static fallback below.
+      if (url.pathname.startsWith('/api/')) {
+        return json({ ok: false, error: '接口不存在' }, 404);
+      }
+
       // Pages (advanced mode) always provides the ASSETS binding.
       // In a plain Worker deployment without an [assets] section this binding
       // is undefined, and calling env.ASSETS.fetch() throws -> Cloudflare 1101.
