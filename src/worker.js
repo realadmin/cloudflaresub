@@ -334,13 +334,16 @@ function parseSourceLimit(value) {
 // know its own version — package.json is not part of the upload package).
 // The update check asks GitHub for UPDATE_REPO's latest release and
 // caches the answer in KV (6h for a hit, 30min for a failure), so the
-// public endpoint costs a handful of GitHub calls a day at most and
-// quietly degrades to "current version only" when GitHub is unreachable.
+// public endpoint costs a handful of GitHub calls a day at most. The
+// endpoint reports an explicit checkStatus (ok / stale / failed) so the
+// page can warn visibly when GitHub could not be reached, instead of
+// mistaking "check failed" for "already up to date".
 const APP_VERSION = '1.4.0';
 const UPDATE_REPO = 'realadmin/cloudflaresub';
 const VERSION_CACHE_KEY = 'sys:latest-release';
 const VERSION_CACHE_MS = 6 * 60 * 60 * 1000;
 const VERSION_NEGATIVE_MS = 30 * 60 * 1000;
+const VERSION_RETRY_MS = 5 * 60 * 1000;
 
 function compareVersions(a, b) {
   const pa = String(a).replace(/^v/, '').split('.').map((n) => parseInt(n, 10) || 0);
@@ -352,16 +355,32 @@ function compareVersions(a, b) {
   return 0;
 }
 
-async function getLatestRelease(env) {
+async function getLatestRelease(env, forceRetry = false) {
   let cached = null;
   try {
     const raw = await env.SUB_STORE.get(VERSION_CACHE_KEY);
     if (raw) cached = JSON.parse(raw);
   } catch {}
   const now = Date.now();
-  if (cached) {
-    const freshFor = cached.tag ? VERSION_CACHE_MS : VERSION_NEGATIVE_MS;
-    if (now - (cached.checkedAt || 0) < freshFor) return cached.tag ? cached : null;
+  const cachedTag = cached && cached.tag ? String(cached.tag) : '';
+  const checkedAt = Number(cached?.checkedAt || 0);
+  const lastAttempt = Number(cached?.lastAttempt || (cachedTag ? 0 : cached?.checkedAt) || 0);
+  if (cachedTag) {
+    if (!forceRetry && now - checkedAt < VERSION_CACHE_MS) {
+      return { ...cached, tag: cachedTag, status: 'ok' };
+    }
+    if (now - lastAttempt < VERSION_RETRY_MS) {
+      return {
+        ...cached,
+        tag: cachedTag,
+        status: now - checkedAt < VERSION_CACHE_MS ? 'ok' : 'stale',
+      };
+    }
+  } else if (cached) {
+    const retryAfter = forceRetry ? VERSION_RETRY_MS : VERSION_NEGATIVE_MS;
+    if (now - lastAttempt < retryAfter) {
+      return { tag: null, url: null, checkedAt: null, status: 'failed' };
+    }
   }
   try {
     const resp = await fetch(`https://api.github.com/repos/${UPDATE_REPO}/releases/latest`, {
@@ -376,35 +395,39 @@ async function getLatestRelease(env) {
       tag,
       url: data.html_url || `https://github.com/${UPDATE_REPO}/releases`,
       checkedAt: now,
+      lastAttempt: now,
     };
     try { await env.SUB_STORE.put(VERSION_CACHE_KEY, JSON.stringify(fresh)); } catch {}
-    return fresh;
+    return { ...fresh, status: 'ok' };
   } catch {
-    // A stale answer beats no answer (the badge must not flap): serve
-    // it, but push its freshness out by only the negative window so an
-    // outage does not turn into a GitHub fetch per page view either.
-    if (cached && cached.tag) {
-      try {
-        await env.SUB_STORE.put(VERSION_CACHE_KEY, JSON.stringify({
-          ...cached,
-          checkedAt: now - VERSION_CACHE_MS + VERSION_NEGATIVE_MS,
-        }));
-      } catch {}
-      return cached;
+    // A stale answer beats no answer, but it is now labelled "stale" so
+    // the page can warn that the latest check failed. The failed attempt
+    // is stamped separately: automatic and manual retries are throttled
+    // for 5 minutes without pretending the old success just happened.
+    if (cachedTag) {
+      const stale = { ...cached, tag: cachedTag, checkedAt, lastAttempt: now };
+      try { await env.SUB_STORE.put(VERSION_CACHE_KEY, JSON.stringify(stale)); } catch {}
+      return { ...stale, status: 'stale' };
     }
-    try { await env.SUB_STORE.put(VERSION_CACHE_KEY, JSON.stringify({ tag: '', checkedAt: now })); } catch {}
-    return null;
+    try {
+      await env.SUB_STORE.put(VERSION_CACHE_KEY, JSON.stringify({ tag: '', checkedAt: now, lastAttempt: now }));
+    } catch {}
+    return { tag: null, url: null, checkedAt: null, status: 'failed' };
   }
 }
 
 async function handleVersion(request, env) {
-  const latest = env.SUB_STORE ? await getLatestRelease(env) : null;
+  const forceRetry = new URL(request.url).searchParams.get('retry') === '1';
+  const result = env.SUB_STORE ? await getLatestRelease(env, forceRetry) : null;
+  const latest = result && result.tag ? result : null;
   return json({
     ok: true,
     version: APP_VERSION,
     latest: latest ? latest.tag : null,
     updateAvailable: latest ? compareVersions(latest.tag, APP_VERSION) > 0 : false,
     releaseUrl: latest ? latest.url : `https://github.com/${UPDATE_REPO}/releases`,
+    checkStatus: result ? result.status : 'failed',
+    checkedAt: latest ? latest.checkedAt || null : null,
   });
 }
 

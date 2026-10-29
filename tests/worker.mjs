@@ -657,6 +657,7 @@ console.log('worker tests passed');
     throw new Error('unexpected fetch ' + url);
   };
   const getVersion = () => worker.fetch(new Request('https://x.pages.dev/api/version'), env).then((r) => r.json());
+  const getVersionRetry = () => worker.fetch(new Request('https://x.pages.dev/api/version?retry=1'), env).then((r) => r.json());
   try {
     const v0 = await getVersion();
     assert.match(v0.version, /^\d+\.\d+\.\d+$/, 'endpoint reports the running version');
@@ -667,6 +668,7 @@ console.log('worker tests passed');
     assert.equal(v1.latest, newer.slice(1), 'latest comes from GitHub');
     assert.equal(v1.updateAvailable, true, 'newer release detected');
     assert.equal(v1.releaseUrl, 'https://example.com/rel');
+    assert.equal(v1.checkStatus, 'ok', 'successful check is reported explicitly');
     const callsAfterFirst = ghCalls;
     const v2 = await getVersion();
     assert.equal(v2.latest, v1.latest, 'second read served from KV cache');
@@ -690,6 +692,7 @@ console.log('worker tests passed');
     ghDown = true;
     const vDown = await getVersion();
     assert.equal(vDown.latest, newer.slice(1), 'stale cache beats a GitHub outage');
+    assert.equal(vDown.checkStatus, 'stale', 'outage with a cached answer is reported as stale');
     const callsDuringOutage = ghCalls;
     await getVersion();
     assert.equal(ghCalls, callsDuringOutage, 'stale-serving throttles outage retries');
@@ -700,10 +703,27 @@ console.log('worker tests passed');
     assert.equal(vNone.latest, null);
     assert.equal(vNone.updateAvailable, false);
     assert.equal(vNone.version, v0.version);
+    assert.equal(vNone.checkStatus, 'failed', 'outage with no cached answer is reported as failed');
     const callsAfterOutage = ghCalls;
     await getVersion();
     assert.equal(ghCalls, callsAfterOutage, 'outage is negatively cached');
-    console.log('version suite: report, compare, KV cache, stale + negative degradation: passed');
+
+    // Manual retry cannot hammer GitHub: inside five minutes it is
+    // refused, after that floor it performs a real re-check.
+    ghDown = false;
+    ghTag = newer;
+    const callsBeforeRetry = ghCalls;
+    const vRetryEarly = await getVersionRetry();
+    assert.equal(vRetryEarly.checkStatus, 'failed', 'early manual retry stays failed');
+    assert.equal(ghCalls, callsBeforeRetry, 'early manual retry does not reach GitHub');
+    const negativeEntry = JSON.parse(store.get('sys:latest-release').value);
+    negativeEntry.lastAttempt = Date.now() - 6 * 60e3;
+    store.set('sys:latest-release', { value: JSON.stringify(negativeEntry) });
+    const vRetry = await getVersionRetry();
+    assert.equal(vRetry.checkStatus, 'ok', 'manual retry re-checks after the five-minute floor');
+    assert.equal(vRetry.latest, newer.slice(1));
+    assert.ok(ghCalls > callsBeforeRetry, 'allowed manual retry reaches GitHub');
+    console.log('version suite: report, compare, KV cache, explicit stale/failed status, rate-limited retry: passed');
   } finally {
     globalThis.fetch = realFetch;
   }

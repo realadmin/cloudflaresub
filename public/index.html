@@ -17,13 +17,21 @@
         <div>
           <p class="eyebrow">InfiCheesy &amp; YouTube &amp; GitHub</p>
 
-          <h1 class="hero-title">
-            <img src="/icons/auto.svg" alt="logo" class="hero-logo" />
-            <span>优选IP订阅生成器</span>
-          </h1>
+          <div class="hero-title-row">
+            <h1 class="hero-title">
+              <img src="/icons/auto.svg" alt="logo" class="hero-logo" />
+              <span>优选IP订阅生成器</span>
+            </h1>
+            <span id="versionStatus" class="version-status is-loading" role="status" aria-live="polite">版本检查中…</span>
+            <a id="versionUpdateLink" class="version-status is-update hidden" href="#" target="_blank" rel="noopener">发现新版本</a>
+          </div>
           <p class="lead">
             只做三件事：导入自建节点、批量替换为优选 IP、输出可导入主流客户端的订阅链接。
           </p>
+          <div id="versionAlert" class="version-alert hidden" role="alert">
+            <span id="versionAlertText"></span>
+            <button id="versionRetryBtn" type="button" class="secondary small">重新检查</button>
+          </div>
         </div>
         <div class="hero-note">
           <strong>适合场景</strong>
@@ -382,11 +390,6 @@ cf.example.com:443#US-Edge
         </div>
       </section>
     </main>
-
-    <footer class="site-footer">
-      <span id="versionInfo">cloudflaresub</span>
-      <a id="updateBadge" class="update-badge hidden" href="#" target="_blank" rel="noopener">有新版本</a>
-    </footer>
 
     <button id="backTopBtn" class="back-top" type="button" aria-label="回到顶部" title="回到顶部">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">

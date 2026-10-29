@@ -912,25 +912,92 @@ if (backTopBtn) {
   });
 }
 
-// ---------------- Footer: current version + update check -------------------
-(async () => {
-  const info = document.getElementById('versionInfo');
-  if (!info) return;
-  try {
-    const resp = await fetch('/api/version');
-    const data = await resp.json().catch(() => null);
-    if (!data || !data.version) return;
-    info.textContent = `cloudflaresub v${data.version}`;
-    if (data.updateAvailable && data.latest) {
-      const badge = document.getElementById('updateBadge');
-      if (badge) {
-        badge.textContent = `有新版本 v${data.latest} →`;
-        badge.href = data.releaseUrl || '#';
-        badge.classList.remove('hidden');
-      }
-    }
-  } catch {
-    // The footer version is a nicety: any failure leaves the plain
-    // product name that the HTML already carries.
+// ------------- Header: current version + update check --------------------
+const versionStatusEl = document.getElementById('versionStatus');
+const versionUpdateLink = document.getElementById('versionUpdateLink');
+const versionAlertEl = document.getElementById('versionAlert');
+const versionAlertTextEl = document.getElementById('versionAlertText');
+const versionRetryBtn = document.getElementById('versionRetryBtn');
+let versionCheckInFlight = false;
+
+function showVersionStatus(state, text) {
+  if (!versionStatusEl || !versionUpdateLink) return;
+  versionUpdateLink.classList.add('hidden');
+  versionStatusEl.classList.remove('hidden');
+  versionStatusEl.className = `version-status is-${state}`;
+  versionStatusEl.textContent = text;
+}
+
+function showVersionUpdate(data) {
+  if (!versionStatusEl || !versionUpdateLink) return;
+  versionStatusEl.classList.add('hidden');
+  versionUpdateLink.classList.remove('hidden');
+  versionUpdateLink.className = 'version-status is-update';
+  versionUpdateLink.textContent = `v${data.version} · 新版 v${data.latest} →`;
+  versionUpdateLink.setAttribute('aria-label', `发现新版本 v${data.latest}，点击查看`);
+  versionUpdateLink.href = data.releaseUrl || 'https://github.com/realadmin/cloudflaresub/releases';
+}
+
+function showVersionAlert(message) {
+  if (!versionAlertEl || !versionAlertTextEl) return;
+  versionAlertTextEl.textContent = message;
+  versionAlertEl.classList.remove('hidden');
+}
+
+function hideVersionAlert() {
+  if (!versionAlertEl || !versionAlertTextEl) return;
+  versionAlertTextEl.textContent = '';
+  versionAlertEl.classList.add('hidden');
+}
+
+async function loadVersionStatus(retry = false) {
+  if (!versionStatusEl || !versionUpdateLink || versionCheckInFlight) return;
+  versionCheckInFlight = true;
+  if (versionRetryBtn) {
+    versionRetryBtn.disabled = true;
+    versionRetryBtn.textContent = '检查中…';
   }
-})();
+  showVersionStatus('loading', retry ? '正在重新检查…' : '版本检查中…');
+  hideVersionAlert();
+  try {
+    const resp = await fetch(retry ? '/api/version?retry=1' : '/api/version', { cache: 'no-store' });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json().catch(() => null);
+    if (!data || !data.version || !['ok', 'stale', 'failed'].includes(data.checkStatus)) {
+      throw new Error('Malformed version response');
+    }
+    if (data.checkStatus === 'failed') {
+      showVersionStatus('failed', `v${data.version} · 检查失败`);
+      showVersionAlert('⚠ 本次新版本检查失败：暂时无法连接 GitHub，无法确认是否有新版本。订阅生成功能不受影响。');
+      return;
+    }
+    if (!data.latest) throw new Error('Version response has no latest release');
+    if (data.updateAvailable) {
+      showVersionUpdate(data);
+      if (data.checkStatus === 'stale') {
+        showVersionAlert('⚠ 本次新版本检查失败：暂时无法连接 GitHub；“发现新版本”的提示来自上次成功检查。订阅生成功能不受影响。');
+      }
+      return;
+    }
+    if (data.checkStatus === 'stale') {
+      showVersionStatus('stale', `v${data.version} · 上次结果`);
+      showVersionAlert('⚠ 本次新版本检查失败：暂时无法连接 GitHub，下面显示的是上次成功检查的结果，暂时不能确认最新状态。订阅生成功能不受影响。');
+      return;
+    }
+    showVersionStatus('current', `v${data.version} · 已是最新`);
+  } catch {
+    showVersionStatus('failed', '版本信息获取失败');
+    showVersionAlert('⚠ 版本信息获取失败：无法连接本站的版本检查接口，暂时无法确认当前版本或是否有新版本。订阅生成功能不受影响。');
+  } finally {
+    versionCheckInFlight = false;
+    if (versionRetryBtn) {
+      versionRetryBtn.disabled = false;
+      versionRetryBtn.textContent = '重新检查';
+    }
+  }
+}
+
+if (versionRetryBtn) {
+  versionRetryBtn.addEventListener('click', () => loadVersionStatus(true));
+}
+loadVersionStatus(false);

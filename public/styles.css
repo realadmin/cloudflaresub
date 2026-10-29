@@ -596,6 +596,18 @@ button.small {
   display:block;
 }
 
+.hero-title-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.hero-title-row .hero-title {
+  margin-bottom: 0;
+}
+
 .hero-title {
   display: flex;
   align-items: center;
@@ -748,32 +760,97 @@ button.small {
   font-size: 0.92rem;
 }
 
-/* ---- Back-to-top round button ---- */
-.site-footer {
-  width: min(1120px, calc(100% - 32px));
-  margin: 0 auto 40px;
-  text-align: center;
-  color: var(--muted);
-  font-size: 0.88rem;
-}
-
-.update-badge {
-  display: inline-block;
-  margin-left: 10px;
-  padding: 3px 12px;
+/* ---- Header version status + update-check warning ---- */
+.version-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid rgba(148, 163, 184, 0.38);
   border-radius: 999px;
-  border: 1px solid rgba(96, 165, 250, 0.55);
-  background: rgba(59, 130, 246, 0.14);
-  color: #93c5fd;
+  background: rgba(15, 23, 42, 0.45);
+  color: var(--muted);
+  font-size: 0.9rem;
   font-weight: 600;
+  line-height: 1.35;
   text-decoration: none;
+  white-space: nowrap;
 }
 
-.update-badge:hover {
-  background: rgba(59, 130, 246, 0.25);
+.version-status::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.version-status.is-current {
+  border-color: rgba(74, 222, 128, 0.45);
+  background: rgba(22, 163, 74, 0.12);
+  color: #86efac;
+}
+
+.version-status.is-update {
+  border-color: rgba(96, 165, 250, 0.68);
+  background: rgba(37, 99, 235, 0.2);
   color: #bfdbfe;
 }
 
+.version-status.is-update:hover {
+  background: rgba(37, 99, 235, 0.3);
+  color: #dbeafe;
+}
+
+.version-status.is-stale {
+  border-color: rgba(245, 158, 11, 0.58);
+  background: rgba(245, 158, 11, 0.13);
+  color: #fcd34d;
+}
+
+.version-status.is-failed {
+  border-color: rgba(248, 113, 113, 0.62);
+  background: rgba(220, 38, 38, 0.14);
+  color: #fca5a5;
+}
+
+.version-alert {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid rgba(245, 158, 11, 0.58);
+  border-radius: 14px;
+  background: rgba(245, 158, 11, 0.13);
+  color: #fde68a;
+  line-height: 1.55;
+}
+
+.version-alert button {
+  flex: 0 0 auto;
+  min-height: 44px;
+}
+
+@media (max-width: 640px) {
+  .hero-title-row {
+    gap: 10px;
+  }
+
+  .version-status {
+    white-space: normal;
+  }
+
+  .version-alert {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
+/* ---- Back-to-top round button ---- */
 .back-top {
   position: fixed;
   right: 22px;
