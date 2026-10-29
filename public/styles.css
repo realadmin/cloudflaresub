@@ -21,6 +21,23 @@ body {
   min-height: 100vh;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color: var(--text);
+  background-color: #0b1220;
+}
+
+/* The page backdrop lives in a layer pinned to the viewport, NOT on
+   body: painted on body, the gradients are sized by the full document
+   height, so anything that changes the page height (expand-all in the
+   admin list, search filtering, a single entry opening) rescales them
+   and the whole page visibly changes colour. Fixed to the viewport,
+   the backdrop depends only on the screen and stays constant.
+   (A fixed pseudo-element, not background-attachment: fixed, which
+   iOS Safari renders unreliably.) */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
   background:
     radial-gradient(circle at top right, rgba(52, 211, 153, 0.12), transparent 30%),
     radial-gradient(circle at top left, rgba(96, 165, 250, 0.18), transparent 26%),
