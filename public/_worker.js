@@ -1111,7 +1111,6 @@ async function handleGenerate(request, env, url) {
 
   return json({
     ok: true,
-    storage: 'kv',
     deduplicated: true,
     shortId: id,
     urls: {
