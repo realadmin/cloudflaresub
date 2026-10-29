@@ -391,11 +391,18 @@ cf.example.com:443#US-Edge
       </section>
     </main>
 
-    <button id="backTopBtn" class="back-top" type="button" aria-label="回到顶部" title="回到顶部">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <path d="M12 19V5M5 12l7-7 7 7" stroke="white" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
-      </svg>
-    </button>
+    <div class="quick-dock">
+      <div class="quick-nav-group" role="navigation" aria-label="快速定位">
+        <button class="quick-nav" type="button" data-target="generator-form">生成</button>
+        <button class="quick-nav" type="button" data-target="resultSection">结果</button>
+        <button class="quick-nav" type="button" data-target="adminSection">管理</button>
+      </div>
+      <button id="backTopBtn" class="back-top" type="button" aria-label="回到顶部" title="回到顶部">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M12 19V5M5 12l7-7 7 7" stroke="white" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+    </div>
 
     <div id="qrModal" class="modal hidden" aria-hidden="true">
       <div class="modal-backdrop" data-close-modal="true"></div>

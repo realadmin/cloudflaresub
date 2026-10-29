@@ -902,6 +902,58 @@ if (backTopBtn) {
   });
 }
 
+// ------------- Quick nav: liquid-glass section dock -------------
+const quickNavBtns = Array.from(document.querySelectorAll('.quick-nav'));
+if (quickNavBtns.length) {
+  const quickSections = quickNavBtns
+    .map((btn) => byId(btn.dataset.target))
+    .filter(Boolean);
+  const setActiveQuickNav = (id) => {
+    quickNavBtns.forEach((btn) => btn.classList.toggle('active', btn.dataset.target === id));
+  };
+  quickNavBtns.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const target = byId(btn.dataset.target);
+      if (!target) return;
+      setActiveQuickNav(btn.dataset.target);
+      const reduce = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+      target.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
+    });
+  });
+  // Scrollspy: the section crossing a line at 40% of the viewport height
+  // is current. Sections are tried in document order, so when the
+  // side-by-side generate/result columns both cross the line on wide
+  // screens 生成 wins; if no section contains the line, the last section
+  // whose top has passed it stays current.
+  const raf = window.requestAnimationFrame
+    ? window.requestAnimationFrame.bind(window)
+    : (fn) => setTimeout(fn, 0);
+  let spyTicking = false;
+  const updateQuickSpy = () => {
+    spyTicking = false;
+    const line = window.innerHeight * 0.4;
+    let activeId = '';
+    for (const sec of quickSections) {
+      const r = sec.getBoundingClientRect();
+      if (r.top <= line && r.bottom > line) { activeId = sec.id; break; }
+    }
+    if (!activeId) {
+      for (const sec of quickSections) {
+        if (sec.getBoundingClientRect().top <= line) activeId = sec.id;
+      }
+    }
+    if (activeId) setActiveQuickNav(activeId);
+  };
+  const onSpyScroll = () => {
+    if (spyTicking) return;
+    spyTicking = true;
+    raf(updateQuickSpy);
+  };
+  window.addEventListener('scroll', onSpyScroll, { passive: true });
+  window.addEventListener('resize', onSpyScroll);
+  updateQuickSpy();
+}
+
 // ------------- Header: current version + update check --------------------
 const versionStatusEl = byId('versionStatus');
 const versionUpdateLink = byId('versionUpdateLink');
