@@ -188,12 +188,9 @@ input[readonly]:focus {
   line-height: 1.6;
 }
 
-/* The preferred-IP panels sit under the source-mode select inside the
-   same form step; keep the form's inner rhythm instead of touching it. */
-#manualIpPanel,
-#apiIpPanel,
-#apiIpPanel .grid {
-  margin-top: 12px;
+/* Per-source test-fetch results are newline-joined; keep the breaks. */
+#ipSourceMsg {
+  white-space: pre-line;
 }
 
 .checkbox-wrap {

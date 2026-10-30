@@ -44,33 +44,17 @@ const demoIps = [
   '104.18.3.4:2053#US-Edge'
 ].join('\n');
 
-// ---------------- Preferred-IP source mode (manual / API dynamic) --------
-const ipModeSelect = byId('ipMode');
-const manualIpPanel = byId('manualIpPanel');
-const apiIpPanel = byId('apiIpPanel');
-const ipSourceUrlInput = byId('ipSourceUrl');
+// ---------------- Preferred-IP box: literal lines + source links --------
 const ipSourceLimitInput = byId('ipSourceLimit');
 const ipSourceMsg = byId('ipSourceMsg');
 const testIpSourceBtn = byId('testIpSourceBtn');
 
-function syncIpMode() {
-  const api = !!(ipModeSelect && ipModeSelect.value === 'api');
-  if (manualIpPanel) manualIpPanel.classList.toggle('hidden', api);
-  if (apiIpPanel) apiIpPanel.classList.toggle('hidden', !api);
-  const ta = byId('preferredIps');
-  if (ta) ta.required = !api;
-  if (ipSourceUrlInput) ipSourceUrlInput.required = api;
-}
-if (ipModeSelect) {
-  ipModeSelect.addEventListener('change', syncIpMode);
-  syncIpMode();
-}
 if (testIpSourceBtn) {
   testIpSourceBtn.addEventListener('click', async () => {
-    const url = (ipSourceUrlInput?.value || '').trim();
+    const text = byId('preferredIps')?.value || '';
     const token = adminToken();
-    if (!url) {
-      ipSourceMsg.textContent = '请先填写来源地址。';
+    if (!/^https?:\/\//im.test(text)) {
+      ipSourceMsg.textContent = '框里还没有来源链接（以 https:// 开头的一行）。';
       return;
     }
     if (!token) {
@@ -80,10 +64,14 @@ if (testIpSourceBtn) {
     testIpSourceBtn.disabled = true;
     ipSourceMsg.textContent = '正在拉取…';
     try {
-      const resp = await postJson('/api/ip-source-test', { url, token });
+      const resp = await postJson('/api/ip-source-test', { text, token });
       const data = await resp.json().catch(() => null);
       if (!resp.ok || !data?.ok) throw new Error((data && data.error) || '拉取失败');
-      ipSourceMsg.textContent = `拉取成功：共解析到 ${data.count} 个可用优选地址。前几个：${(data.sample || []).join('、')}`;
+      ipSourceMsg.textContent = data.results
+        .map((r) => (r.ok
+          ? `✓ ${r.url}：解析到 ${r.count} 个可用优选地址${r.sample?.length ? `（前几个：${r.sample.join('、')}）` : ''}`
+          : `✗ ${r.url}：${r.error || '拉取失败'}`))
+        .join('\n');
     } catch (e) {
       ipSourceMsg.textContent = `拉取失败：${e.message || e}`;
     } finally {
@@ -101,10 +89,6 @@ if (storageModeSelect && retentionDaysInput) {
 }
 
 fillDemoBtn.addEventListener('click', () => {
-  if (ipModeSelect) {
-    ipModeSelect.value = 'manual';
-    ipModeSelect.dispatchEvent(new Event('change', { bubbles: true }));
-  }
   byId('nodeLinks').value = demoVmess;
   byId('preferredIps').value = demoIps;
   byId('namePrefix').value = 'CF';
@@ -119,8 +103,6 @@ form.addEventListener('submit', async (event) => {
   const payload = {
     nodeLinks: byId('nodeLinks').value,
     preferredIps: byId('preferredIps').value,
-    ipMode: ipModeSelect?.value || 'manual',
-    sourceUrl: ipSourceUrlInput?.value || '',
     sourceLimit: Number(ipSourceLimitInput?.value || 10),
     namePrefix: byId('namePrefix').value,
     keepOriginalHost: byId('keepOriginalHost').checked,
@@ -422,7 +404,7 @@ function renderAdminList() {
           <div class="cell"><textarea class="note-input" maxlength="80" rows="4" placeholder="（未填备注）">${escapeHtml(item.note || '')}</textarea></div>
           <div class="cell">${escapeHtml(created)}</div>
           <div class="cell">${retention}</div>
-          <div class="cell">${escapeHtml((item.sources || []).join(', ') || '-')}${item.dynamic ? '<br><span class="hint">动态订阅 · 跟随来源更新</span>' : ''}</div>
+          <div class="cell">${escapeHtml((item.sources || []).join(', ') || '-')}${item.dynamic ? `<br><span class="hint">动态订阅 · ${item.sourceCount > 1 ? `${item.sourceCount} 个来源跟随更新` : '跟随来源更新'}</span>` : ''}</div>
           <div class="cell">${item.outputNodes ?? '-'}</div>
           <div class="cell">
             <div class="admin-actions">
@@ -641,12 +623,11 @@ function fillGenerateForm(bf) {
     if (el) el.value = value ?? '';
   };
   setValue('nodeLinks', bf.nodeLinks);
-  setValue('preferredIps', bf.preferredIps);
-  if (ipModeSelect) {
-    ipModeSelect.value = bf.ipMode === 'api' ? 'api' : 'manual';
-    ipModeSelect.dispatchEvent(new Event('change', { bubbles: true }));
-  }
-  setValue('ipSourceUrl', bf.sourceUrl);
+  // Into the one mixed box: mixed entries restore their box verbatim;
+  // a legacy api entry becomes its single source line (its snapshot
+  // endpoints stay visible in the entry's expanded link cards).
+  if (bf.ipMode === 'api' && bf.sourceUrl) setValue('preferredIps', bf.sourceUrl);
+  else setValue('preferredIps', bf.preferredIps);
   if (bf.sourceLimit) setValue('ipSourceLimit', bf.sourceLimit);
   setValue('namePrefix', bf.namePrefix);
   const keep = byId('keepOriginalHost');

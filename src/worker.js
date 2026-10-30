@@ -100,6 +100,35 @@ function parsePreferredEndpoints(input) {
     });
 }
 
+const MAX_MIXED_SOURCES = 5;
+
+// Split the mixed preferred-IP box into its lines, tagged by kind.
+// A line starting with a scheme is meant to be a source link (it gets
+// fetched and expanded); every other line is a literal endpoint,
+// parsed exactly like the old manual list. The box order is preserved
+// in `lines` because generation merges in box order.
+function splitMixedPreferred(text) {
+  const lines = [];
+  const literals = [];
+  const urls = [];
+  for (const rawLine of String(text || '').split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    if (/^https?:\/\//i.test(line)) {
+      lines.push({ url: line });
+      urls.push(line);
+    } else {
+      lines.push({ text: line });
+      literals.push(line);
+    }
+  }
+  return { lines, literals, urls };
+}
+
+function safeHost(u) {
+  try { return new URL(u).host; } catch { return String(u); }
+}
+
 // ---- Preferred-IP API sources (dynamic subscriptions) --------------------
 // A dynamic entry follows an external preferred-IP list (typically a
 // public CloudflareSpeedTest-style publication) instead of a fixed
@@ -303,12 +332,38 @@ async function getSourceEndpoints(env, rawUrl, now = Date.now()) {
   }
 }
 
-// The endpoints a dynamic entry should serve right now: the source's
-// latest list (via cache), or the entry's generation-time snapshot when
-// the source has never been reachable since.
+// The endpoints a dynamic entry should serve right now: the entry's
+// fixed literal lines plus each source's latest list (via cache), or
+// the generation-time snapshot when a source has never been reachable
+// since.
 async function resolveDynamicEndpoints(env, record) {
   const dyn = record.dynamic;
   const limit = dyn.limit || 10;
+  if (Array.isArray(dyn.sources) && dyn.sources.length) {
+    const merged = [];
+    const seen = new Set();
+    const push = (ep) => {
+      const key = `${ep.server}:${ep.port ?? ''}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      merged.push(ep);
+    };
+    (Array.isArray(dyn.literals) ? dyn.literals : []).forEach(push);
+    for (const src of dyn.sources) {
+      let eps = null;
+      try {
+        const { endpoints } = await getSourceEndpoints(env, src.url);
+        const sliced = endpoints.slice(0, limit);
+        if (sliced.length) eps = sliced;
+      } catch {}
+      if (!eps && Array.isArray(src.endpoints)) eps = src.endpoints.slice(0, limit);
+      (eps || []).forEach(push);
+    }
+    if (merged.length) return merged;
+    const snapshot = Array.isArray(dyn.endpoints) ? dyn.endpoints : [];
+    return snapshot.length ? snapshot : null;
+  }
+  // Legacy single-source shape (records written before mixed sources).
   try {
     const { endpoints } = await getSourceEndpoints(env, dyn.sourceUrl);
     const sliced = endpoints.slice(0, limit);
@@ -946,40 +1001,99 @@ async function handleGenerate(request, env, url) {
   const skippedLines = parsed.skipped + (parsed.nodes.length - baseNodes.length);
   if (!baseNodes.length) return json({ ok: false, error: '没有识别到可用节点' }, 400);
 
-  // Preferred endpoints come either from the pasted list (a fixed
-  // snapshot) or from an API source the entry will keep following
-  // (a dynamic subscription).
-  let preferredEndpoints;
+  // Preferred endpoints come from ONE mixed box: literal lines are a
+  // fixed snapshot, while lines that are https URLs are sources the
+  // entry keeps following (a dynamic subscription). No URL lines at
+  // all = a static entry, exactly like the old manual mode. The legacy
+  // ipMode:'api' payload folds into the same path — its sourceUrl is
+  // treated as the box's only line.
+  let mixedText = String(body.preferredIps || '');
+  if (body.ipMode === 'api' && body.sourceUrl) mixedText = String(body.sourceUrl);
+  const mixed = splitMixedPreferred(mixedText);
+  const limit = parseSourceLimit(body.sourceLimit);
+  // Validate + normalize the source URLs up front: a URL-shaped line
+  // was typed deliberately, so a bad one fails loudly here instead of
+  // being silently dropped like a stray bad IP line. The NORMALIZED
+  // URL (host lowercased, default port dropped) is the source's
+  // identity: spelling variants dedup onto one source.
+  let sourceUrls;
+  try {
+    sourceUrls = [...new Set(mixed.urls.map((u) => assertSourceUrl(u)))];
+  } catch (e) {
+    return json({ ok: false, error: `优选 IP 来源链接不可用：${e.message || e}` }, 400);
+  }
+  if (sourceUrls.length > MAX_MIXED_SOURCES) {
+    return json({ ok: false, error: `来源链接最多 ${MAX_MIXED_SOURCES} 个，当前有 ${sourceUrls.length} 个` }, 400);
+  }
+  const literalEndpoints = parsePreferredEndpoints(mixed.literals.join('\n'));
+  if (literalEndpoints.some((ep) => ep.badPort)) {
+    return json({ ok: false, error: '优选地址的端口需要在 1 到 65535 之间' }, 400);
+  }
+  // Fetch every source in parallel; each keeps the cache / stale-cache
+  // fallbacks of getSourceEndpoints. A source with nothing usable at
+  // all is skipped (and named in the warnings) as long as something
+  // else produced endpoints — it stays on the entry and heals itself
+  // on a later refresh.
+  const sourceResults = await Promise.all(sourceUrls.map(async (u) => {
+    try {
+      const s = await getSourceEndpoints(env, u);
+      return { url: s.url, endpoints: s.endpoints, total: s.endpoints.length, fromCache: !!s.fromCache, error: null };
+    } catch (e) {
+      return { url: u, endpoints: [], total: 0, fromCache: false, error: e.message || String(e) };
+    }
+  }));
+  const resultByUrl = new Map(sourceResults.map((r) => [r.url, r]));
+  // Merge in box order: literal lines stay in place, source lines
+  // expand to their (limited) list. Source endpoints dedupe against
+  // everything already emitted (first occurrence wins, like the source
+  // adapter itself); literal lines keep the old no-dedupe behaviour.
+  const preferredEndpoints = [];
+  const seenEp = new Set();
+  const epKey = (ep) => `${ep.server}:${ep.port ?? ''}`;
+  for (const line of mixed.lines) {
+    if (line.url) {
+      let key;
+      try { key = assertSourceUrl(line.url); } catch { continue; }
+      const r = resultByUrl.get(key);
+      if (!r || r.error) continue;
+      for (const ep of r.endpoints.slice(0, limit)) {
+        if (seenEp.has(epKey(ep))) continue;
+        seenEp.add(epKey(ep));
+        preferredEndpoints.push(ep);
+      }
+    } else {
+      const ep = parsePreferredEndpoints(line.text)[0];
+      if (!ep) continue;
+      seenEp.add(epKey(ep));
+      preferredEndpoints.push(ep);
+    }
+  }
+  if (!preferredEndpoints.length) {
+    const firstErr = sourceResults.find((r) => r.error);
+    if (firstErr) {
+      return json({ ok: false, error: `优选 IP 来源拉取失败：${firstErr.error}` }, 400);
+    }
+    return json({ ok: false, error: '没有识别到可用优选地址' }, 400);
+  }
   let dynamic = null;
   let sourceInfo = null;
-  if (body.ipMode === 'api') {
-    const limit = parseSourceLimit(body.sourceLimit);
-    let source;
-    try {
-      source = await getSourceEndpoints(env, String(body.sourceUrl || ''));
-    } catch (e) {
-      return json({ ok: false, error: `优选 IP 来源拉取失败：${e.message || e}` }, 400);
-    }
-    preferredEndpoints = source.endpoints.slice(0, limit);
-    if (!preferredEndpoints.length) {
-      return json({ ok: false, error: '优选 IP 来源没有返回可用的优选地址' }, 400);
-    }
+  if (sourceUrls.length) {
     dynamic = {
-      // The NORMALIZED URL (host lowercased, default port dropped) is
-      // the entry's source identity: spelling variants of the same
-      // source dedup onto one entry instead of minting duplicates.
-      sourceUrl: source.url,
+      // The first source stays in sourceUrl for older readers (list
+      // badges, legacy backfill); sources[] is the full picture, each
+      // with its own snapshot for the /sub fallback chain.
+      sourceUrl: sourceUrls[0],
+      sources: sourceResults.map((r) => ({ url: r.url, endpoints: r.endpoints.slice(0, limit) })),
       limit,
+      literals: literalEndpoints,
       endpoints: preferredEndpoints,
       snapshotAt: new Date().toISOString(),
     };
-    sourceInfo = { total: source.endpoints.length, fromCache: !!source.fromCache };
-  } else {
-    preferredEndpoints = parsePreferredEndpoints(body.preferredIps || '');
-    if (preferredEndpoints.some((ep) => ep.badPort)) {
-      return json({ ok: false, error: '优选地址的端口需要在 1 到 65535 之间' }, 400);
-    }
-    if (!preferredEndpoints.length) return json({ ok: false, error: '没有识别到可用优选地址' }, 400);
+    sourceInfo = {
+      total: sourceResults.reduce((n, r) => n + r.total, 0),
+      fromCache: sourceResults.every((r) => r.fromCache || !!r.error),
+      failed: sourceResults.filter((r) => r.error),
+    };
   }
 
   const options = {
@@ -1015,20 +1129,33 @@ async function handleGenerate(request, env, url) {
   // field existed are reconstructed from their stored nodes instead.
   const inputs = {
     nodeLinks: String(body.nodeLinks || '').slice(0, 100000),
-    preferredIps: dynamic ? '' : String(body.preferredIps || '').slice(0, 50000),
-    ipMode: dynamic ? 'api' : 'manual',
+    // The mixed box is stored verbatim: backfill restores it exactly,
+    // URL lines and literal lines alike.
+    preferredIps: mixedText.slice(0, 50000),
+    ipMode: dynamic ? 'mixed' : 'manual',
     sourceUrl: dynamic ? dynamic.sourceUrl : '',
     sourceLimit: dynamic ? dynamic.limit : 10,
   };
   const retention = parseRetention(body);
   if (retention.error) return json({ ok: false, error: retention.error }, 400);
 
-  // A dynamic entry's identity is its nodes + its SOURCE (not whichever
-  // IPs the source happens to return today), so re-generating while the
-  // list rotates still lands on the same entry and refreshes it.
-  const dedupHash = await buildDedupHash(
-    dynamic ? { ...body, preferredIps: `api:${dynamic.sourceUrl}|${dynamic.limit}` } : body,
-  );
+  // A dynamic entry's identity is its nodes + its literal endpoints +
+  // its SOURCE SET (not whichever IPs the sources happen to return
+  // today), so re-generating while a list rotates still lands on the
+  // same entry and refreshes it. A single source with no literals
+  // keeps the legacy `api:` identity, so entries created by the old
+  // two-mode form refresh in place instead of duplicating.
+  let dedupBody = body;
+  if (dynamic) {
+    const litPart = literalEndpoints
+      .map((ep) => `${ep.server}:${ep.port ?? ''}#${ep.remark || ''}`)
+      .join('\n');
+    const identity = sourceUrls.length === 1 && literalEndpoints.length === 0
+      ? `api:${sourceUrls[0]}|${limit}`
+      : `mix:${litPart}|${[...sourceUrls].sort().join('\n')}|${limit}`;
+    dedupBody = { ...body, preferredIps: identity };
+  }
+  const dedupHash = await buildDedupHash(dedupBody);
   const dedupKey = `dedup:${dedupHash}`;
 
   let id = await env.SUB_STORE.get(dedupKey);
@@ -1138,13 +1265,31 @@ async function handleGenerate(request, env, url) {
       sni: node.sni || '',
     })),
     dynamic: dynamic
-      ? { sourceUrl: dynamic.sourceUrl, limit: dynamic.limit, sourceTotal: sourceInfo.total, fromCache: sourceInfo.fromCache }
+      ? {
+          sourceUrl: dynamic.sourceUrl,
+          limit: dynamic.limit,
+          sourceTotal: sourceInfo.total,
+          fromCache: sourceInfo.fromCache,
+          sources: sourceResults.map((r) => ({
+            url: r.url,
+            total: r.total,
+            used: r.endpoints.slice(0, dynamic.limit).length,
+            fromCache: r.fromCache,
+            error: r.error,
+          })),
+        }
       : null,
     warnings: [
       ...(accessToken ? [] : ['未检测到 SUB_ACCESS_TOKEN，订阅链接将没有第二层访问保护。']),
       ...(skippedLines > 0 ? [`有 ${skippedLines} 行节点链接无法解析或端口不可用，已跳过。`] : []),
-      ...(dynamic
+      ...(dynamic && sourceUrls.length === 1 && !sourceInfo.failed.length
         ? [`动态订阅：将自动跟随来源的最新优选 IP（约每小时刷新；来源不可用时用上次快照兜底）。来源现有 ${sourceInfo.total} 个优选地址，本次使用前 ${dynamic.limit} 个。`]
+        : []),
+      ...(dynamic && sourceUrls.length > 1
+        ? [`动态订阅：将自动跟随 ${sourceUrls.length} 个来源的最新优选 IP（约每小时刷新；来源不可用时用上次快照兜底）。`]
+        : []),
+      ...(dynamic
+        ? sourceInfo.failed.map((r) => `来源 ${safeHost(r.url)} 本次拉取失败，已跳过；订阅仍会跟随它，恢复后自动生效。`)
         : []),
     ],
   });
@@ -1226,6 +1371,11 @@ async function handleList(request, env, url) {
           item.storage = rec.storage || { mode: 'permanent' };
           item.dynamic = !!rec.dynamic;
           if (rec.dynamic && rec.dynamic.sourceUrl) item.sourceUrl = rec.dynamic.sourceUrl;
+          if (rec.dynamic) {
+            item.sourceCount = Array.isArray(rec.dynamic.sources)
+              ? rec.dynamic.sources.length
+              : (rec.dynamic.sourceUrl ? 1 : 0);
+          }
         } catch {}
       }
       item.linkToken = await linkTokenFor(id, env);
@@ -1310,6 +1460,18 @@ function buildBackfill(record) {
     storage: record.storage || { mode: 'permanent' },
   };
   if (record.inputs && typeof record.inputs.nodeLinks === 'string' && record.inputs.nodeLinks) {
+    if (record.inputs.ipMode === 'mixed') {
+      // Mixed-box entries store the box verbatim; restore it as-is.
+      return {
+        ...base,
+        exact: true,
+        nodeLinks: record.inputs.nodeLinks,
+        preferredIps: record.inputs.preferredIps || '',
+        ipMode: 'mixed',
+        sourceUrl: record.inputs.sourceUrl || '',
+        sourceLimit: record.inputs.sourceLimit || 10,
+      };
+    }
     return {
       ...base,
       exact: true,
@@ -1368,6 +1530,38 @@ async function parseAdminBody(request, env) {
 async function handleIpSourceTest(request, env) {
   const { body, error } = await parseAdminBody(request, env);
   if (error) return error;
+  // Mixed-box mode: the page sends the whole box and every URL line in
+  // it is test-fetched live, reported individually.
+  if (typeof body.text === 'string') {
+    const mixed = splitMixedPreferred(body.text);
+    let urls;
+    try {
+      urls = [...new Set(mixed.urls.map((u) => assertSourceUrl(u)))];
+    } catch (e) {
+      return json({ ok: false, error: `来源链接不可用：${e.message || e}` }, 400);
+    }
+    if (!urls.length) return json({ ok: false, error: '框里没有来源链接（以 https:// 开头的一行）' }, 400);
+    if (urls.length > MAX_MIXED_SOURCES) {
+      return json({ ok: false, error: `来源链接最多 ${MAX_MIXED_SOURCES} 个，当前有 ${urls.length} 个` }, 400);
+    }
+    const results = await Promise.all(urls.map(async (u) => {
+      try {
+        const fresh = await fetchIpSource(u);
+        return {
+          url: fresh.url,
+          ok: true,
+          candidates: fresh.candidates,
+          count: fresh.endpoints.length,
+          sample: fresh.endpoints
+            .slice(0, 5)
+            .map((ep) => (ep.port ? `${formatHostForUrl(ep.server)}:${ep.port}` : ep.server)),
+        };
+      } catch (e) {
+        return { url: u, ok: false, error: e.message || String(e) };
+      }
+    }));
+    return json({ ok: true, results, literalCount: mixed.literals.length });
+  }
   try {
     const fresh = await fetchIpSource(String(body.url || ''));
     return json({

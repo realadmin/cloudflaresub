@@ -591,9 +591,120 @@ console.log('worker tests passed');
     assert.equal(v1.shortId, dyn.shortId, 'uppercase/default-port variant lands on the original entry');
     assert.equal(v2.shortId, v1.shortId, 'source URL spelling variants dedup to one entry');
     const entryResp = await (await worker.fetch(adminReq(`/api/entry?id=${dyn.shortId}`), env)).json();
-    assert.equal(entryResp.backfill.ipMode, 'api', 'backfill knows api mode');
-    assert.ok(entryResp.backfill.preferredIps.includes('104.16.1.2'), 'backfill carries snapshot lines for manual switching');
+    // Backfill contract after the mixed-box redesign: an entry made via
+    // the legacy api payload backfills as its source line in the mixed
+    // box, and regenerating from that line refreshes the same entry
+    // (the single-source identity bridge keeps the legacy api: hash).
+    assert.equal(entryResp.backfill.ipMode, 'mixed', 'backfill reports the mixed box');
+    assert.equal(entryResp.backfill.preferredIps, 'https://ips.example.com/list.txt', 'backfill box holds the source line');
+    const dynRe = await generate({ nodeLinks: node, preferredIps: 'https://ips.example.com/list.txt', sourceLimit: 2 });
+    assert.equal(dynRe.shortId, dyn.shortId, 'lone-source mixed regeneration refreshes the legacy entry');
     console.log('dynamic suite: source parsing, follow-on-rotate, cache + snapshot fallbacks, source-based dedup: passed');
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+}
+
+// --- Mixed-source suite: literal lines + multiple source URLs in one box ---
+{
+  const realFetch = globalThis.fetch;
+  let listA = '104.16.2.2\n104.16.2.3:8443\n104.16.2.4';
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    if (u === 'https://a.example.com/l.txt') return new Response(listA, { status: 200 });
+    if (u === 'https://b.example.com/l.txt') return new Response('104.16.3.3\n104.16.2.3:8443', { status: 200 });
+    if (u === 'https://dead.example.com/l.txt') throw new Error('network down');
+    throw new Error('unexpected fetch ' + u);
+  };
+  const genRaw = (body) => worker.fetch(new Request('https://x.pages.dev/api/generate', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ token: 'tok', ...body }),
+  }), env);
+  try {
+    const mixedText = '104.16.9.1#FIXED\nhttps://a.example.com/l.txt\nhttps://b.example.com/l.txt';
+    const mix = await generate({ nodeLinks: node, preferredIps: mixedText, sourceLimit: 2 });
+    assert.equal(mix.counts.preferredEndpoints, 4, 'literal + first-2 of each source, cross-source dup dropped');
+    assert.equal(mix.counts.outputNodes, 4);
+    assert.equal(mix.dynamic.sources.length, 2, 'both sources reported');
+    assert.equal(mix.dynamic.sourceTotal, 5, 'source totals summed');
+    assert.ok(mix.warnings.some((w) => w.includes('2 个来源')), 'multi-source warning');
+    const order = ['104.16.9.1', '104.16.2.2', '104.16.2.3', '104.16.3.3'].map((s) => mix.plainText.indexOf(s));
+    assert.ok(order.every((v, i) => v >= 0 && (i === 0 || order[i - 1] < v)), 'merged in box order');
+
+    // Per-source test-fetch over the whole box.
+    const tp = await worker.fetch(new Request('https://x.pages.dev/api/ip-source-test', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ token: 'tok', text: '1.2.3.4\nhttps://a.example.com/l.txt\nhttps://dead.example.com/l.txt' }),
+    }), env).then((r) => r.json());
+    assert.equal(tp.ok, true);
+    assert.equal(tp.literalCount, 1, 'literal lines counted');
+    assert.equal(tp.results.length, 2);
+    assert.equal(tp.results[0].count, 3, 'live source counted');
+    assert.equal(tp.results[1].ok, false, 'dead source reported, not fatal');
+
+    // Record shape: literals + per-source snapshots are stored.
+    const rec = JSON.parse(store.get(`sub:${mix.shortId}`).value);
+    assert.equal(rec.dynamic.sources.length, 2);
+    assert.equal(rec.dynamic.literals.length, 1);
+    assert.equal(rec.dynamic.literals[0].server, '104.16.9.1');
+    assert.equal(rec.inputs.ipMode, 'mixed');
+    assert.equal(rec.inputs.preferredIps, mixedText, 'mixed box stored verbatim');
+
+    // The admin list reports the source count.
+    const lr = await (await worker.fetch(adminReq('/api/list'), env)).json();
+    const item = lr.items.find((i) => i.id === mix.shortId);
+    assert.equal(item.dynamic, true);
+    assert.equal(item.sourceCount, 2);
+    assert.equal(item.sourceUrl, 'https://a.example.com/l.txt', 'first source kept for older readers');
+
+    // Backfill restores the mixed box exactly.
+    const entryResp = await (await worker.fetch(adminReq(`/api/entry?id=${mix.shortId}`), env)).json();
+    assert.equal(entryResp.backfill.ipMode, 'mixed');
+    assert.equal(entryResp.backfill.preferredIps, mixedText);
+    assert.equal(entryResp.backfill.sourceLimit, 2);
+
+    // /sub follows a rotation in ONE source; literals and the other
+    // source stay put.
+    const sub1 = await getSub(mix.shortId, 'plain');
+    assert.equal(sub1.body, mix.plainText, 'sub initially serves the generation merge');
+    listA = '104.16.2.9';
+    for (const k of [...store.keys()].filter((x) => x.startsWith('ipcache:'))) {
+      const c = JSON.parse(store.get(k).value);
+      c.fetchedAt = Date.now() - 2 * 3600e3;
+      c.lastAttempt = 0;
+      store.set(k, { value: JSON.stringify(c) });
+    }
+    const sub2 = await getSub(mix.shortId, 'plain');
+    assert.ok(sub2.body.includes('@104.16.2.9:443'), 'rotated source followed');
+    assert.ok(sub2.body.includes('@104.16.9.1:443'), 'literal line stays fixed');
+    assert.ok(sub2.body.includes('@104.16.3.3:443'), 'other source unchanged');
+    assert.ok(!sub2.body.includes('104.16.2.2'), 'rotated-out endpoint gone');
+
+    // Identity: same box refreshes; source order in the box does not
+    // matter; a different limit is a different entry.
+    const mixAgain = await generate({ nodeLinks: node, preferredIps: mixedText, sourceLimit: 2 });
+    assert.equal(mixAgain.shortId, mix.shortId, 'same mixed content refreshes the same entry');
+    const mixSwapped = await generate({ nodeLinks: node, preferredIps: '104.16.9.1#FIXED\nhttps://b.example.com/l.txt\nhttps://a.example.com/l.txt', sourceLimit: 2 });
+    assert.equal(mixSwapped.shortId, mix.shortId, 'source order is not part of the identity');
+    const mixLimit = await generate({ nodeLinks: node, preferredIps: mixedText, sourceLimit: 3 });
+    assert.notEqual(mixLimit.shortId, mix.shortId, 'limit is part of the identity');
+
+    // A dead source next to literals is skipped with a named warning;
+    // a dead source alone fails like the old single-source path.
+    const tolerated = await generate({ nodeLinks: node, preferredIps: '104.16.9.1\nhttps://dead.example.com/l.txt', sourceLimit: 2 });
+    assert.equal(tolerated.counts.preferredEndpoints, 1, 'dead source skipped, literals still generate');
+    assert.ok(tolerated.warnings.some((w) => w.includes('dead.example.com') && w.includes('拉取失败')), 'dead source named in warnings');
+    const deadOnly = await genRaw({ nodeLinks: node, preferredIps: 'https://dead.example.com/l.txt' });
+    assert.equal(deadOnly.status, 400, 'dead source with nothing else fails');
+    assert.ok((await deadOnly.json()).error.includes('来源拉取失败'), 'failure names the source fetch');
+
+    // Guards: http lines and too many sources are clear 400s.
+    const httpLine = await genRaw({ nodeLinks: node, preferredIps: 'http://a.example.com/l.txt' });
+    assert.equal(httpLine.status, 400, 'http source line rejected');
+    const six = await genRaw({ nodeLinks: node, preferredIps: [1, 2, 3, 4, 5, 6].map((i) => `https://s${i}.example.com/l.txt`).join('\n') });
+    assert.equal(six.status, 400, 'six sources refused');
+    assert.ok((await six.json()).error.includes('最多 5 个'), 'cap named in the error');
+    console.log('mixed suite: box parsing, ordered merge, per-source fallback, identity, guards: passed');
   } finally {
     globalThis.fetch = realFetch;
   }

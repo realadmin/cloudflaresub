@@ -62,46 +62,35 @@
           </div>
 
           <div>
-            <label for="ipMode">2. 优选 IP / 优选域名来源</label>
-            <select id="ipMode" name="ipMode">
-              <option value="manual" selected>手动填写（固定内容）</option>
-              <option value="api">API 动态来源（订阅自动跟随最新优选）</option>
-            </select>
-            <div id="manualIpPanel">
-              <textarea
-                id="preferredIps"
-                name="preferredIps"
-                rows="8"
-                placeholder="示例：
+            <label for="preferredIps">2. 优选 IP / 优选域名来源（可混写）</label>
+            <textarea
+              id="preferredIps"
+              name="preferredIps"
+              rows="8"
+              placeholder="示例：
 104.16.1.2#HK-01
 104.17.2.3:2053#HK-02
 cf.example.com:443#US-Edge
-2606:4700::1#IPv6"
-                required
-              ></textarea>
-              <p class="hint">
-                支持 <code>IP</code>、<code>IP:端口</code>、<code>域名</code>、<code>域名:端口</code>，<code>#</code> 后面可写备注。
-                IPv6 可填裸地址 <code>2606:4700::1</code>（不带端口），或带端口的方括号写法 <code>[2606:4700::1]:443</code>。
-              </p>
-            </div>
-            <div id="apiIpPanel" class="hidden">
-              <label for="ipSourceUrl">优选 IP 来源地址（https）</label>
-              <input id="ipSourceUrl" name="ipSourceUrl" type="url" placeholder="https://example.com/ips.txt" />
-              <div class="grid two-col compact">
-                <div>
-                  <label for="ipSourceLimit">最多使用前几个</label>
-                  <input id="ipSourceLimit" name="ipSourceLimit" type="number" min="1" max="100" step="1" value="10" />
-                </div>
-                <div>
-                  <label>&nbsp;</label>
-                  <button id="testIpSourceBtn" type="button" class="secondary">测试拉取</button>
-                </div>
+2606:4700::1#IPv6
+https://example.com/ips.txt"
+              required
+            ></textarea>
+            <p class="hint">
+              一行一个，两种写法可混写、按填写顺序合并：直接写 <code>IP</code>、<code>IP:端口</code>、<code>域名</code>、<code>域名:端口</code>（<code>#</code> 后面可写备注；IPv6 可填裸地址 <code>2606:4700::1</code>，或带端口的方括号写法 <code>[2606:4700::1]:443</code>）；
+              或写一行 <code>https://</code> 链接（最多 5 个），生成时会拉取该链接的优选列表（一行一个，也支持 CSV 测速结果和 JSON 列表）并合并进来。
+              框里只要含链接，这条订阅就是动态的：手写行固定不变，链接部分约每小时跟随来源更新，来源暂时不可用时自动使用上次的快照，订阅不会中断。
+            </p>
+            <div class="grid two-col compact">
+              <div>
+                <label for="ipSourceLimit">每个链接最多取前几个</label>
+                <input id="ipSourceLimit" name="ipSourceLimit" type="number" min="1" max="100" step="1" value="10" />
               </div>
-              <p class="hint" id="ipSourceMsg">
-                动态订阅会约每小时从来源刷新一次优选 IP，客户端拉到的永远是最新一批；来源暂时不可用时自动使用上次的快照，订阅不会中断。
-                来源格式：一行一个 IP / 域名（可带 <code>:端口</code>），也支持 CSV 测速结果和 JSON 列表。
-              </p>
+              <div>
+                <label>&nbsp;</label>
+                <button id="testIpSourceBtn" type="button" class="secondary">测试拉取链接</button>
+              </div>
             </div>
+            <p class="hint" id="ipSourceMsg"></p>
           </div>
 
           <div class="grid two-col compact">
