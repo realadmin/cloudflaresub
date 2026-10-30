@@ -340,3 +340,16 @@ cloudflaresub/
 ## 致谢
 
 - 原项目：[InfiCheesy/cloudflaresub](https://github.com/InfiCheesy/cloudflaresub)（Workers 版），本项目在其基础上迁移到 Pages 并持续增强。
+
+## 赞赏支持
+
+本 Fork 由 针管RA（realadmin）持续开发和维护。如果这个 Pages 增强版对你有帮助，欢迎自愿赞赏维护者，一杯咖啡就很感谢了。赞赏完全自愿，不影响任何功能的使用，也不会解锁额外内容——所有功能都会继续免费、完整地提供。
+
+| USDT – TRON（TRC20，推荐） | USDT / USDC – Solana |
+| :---: | :---: |
+| <img src="images/donate-usdt-tron.png" alt="USDT-TRON 收款二维码" width="220"> | <img src="images/donate-solana.png" alt="Solana 收款二维码" width="220"> |
+| `TRKBcWhkSY6BWiABoGFkhFdPSDhbuxsQT2` | `BFyffqJbRnNYKvFyuDoFLSxVW1F5UmEgNWqNtV8njwTp` |
+
+转账前请务必核对网络与地址是否一致：第一栏只能走 TRON 网络，第二栏只能走 Solana 网络，链选错或地址填错，资产通常无法找回。
+
+> 说明：以上赞赏对象仅为本 Fork 的维护者 针管RA，与原项目及其作者 InfiCheesy 无关。如需支持原项目，请前往原仓库。
