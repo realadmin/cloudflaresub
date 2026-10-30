@@ -152,6 +152,11 @@ function assertSourceUrl(raw) {
   // Credentials in a source URL would be stored on the entry; strip them.
   u.username = '';
   u.password = '';
+  // A fragment is never sent to the server, so it identifies nothing:
+  // the preferred-IP box teaches "#备注" for literal lines, and a
+  // remark typed after a source link must not split one list into
+  // several entries / caches.
+  u.hash = '';
   const host = u.hostname.toLowerCase();
   if (host === 'localhost' || host.endsWith('.local') || host.endsWith('.internal')) {
     throw new Error('来源地址不允许指向内网主机');
@@ -330,6 +335,46 @@ async function getSourceEndpoints(env, rawUrl, now = Date.now()) {
     }
     throw e;
   }
+}
+
+// A refresh that could not reach a source must not erase the snapshot
+// that source accumulated: while the source is down and its cache entry
+// is gone, the stored snapshot is the only thing keeping its endpoints
+// in the pool. Carry the previous snapshot over for every source that
+// failed THIS round (its fresh snapshot is empty then), and rebuild
+// the merged fallback so it still contains those endpoints too.
+function carryOverFailedSnapshots(next, prev, sourceResults) {
+  if (!prev || !Array.isArray(next.sources)) return;
+  const failed = new Set(sourceResults.filter((r) => r.error).map((r) => r.url));
+  if (!failed.size) return;
+  const prevByUrl = new Map();
+  if (Array.isArray(prev.sources)) {
+    for (const s of prev.sources) if (s && s.url) prevByUrl.set(s.url, s.endpoints || []);
+  } else if (prev.sourceUrl) {
+    prevByUrl.set(prev.sourceUrl, prev.endpoints || []);
+  }
+  let restored = false;
+  for (const s of next.sources) {
+    if (!failed.has(s.url) || (s.endpoints && s.endpoints.length)) continue;
+    const old = prevByUrl.get(s.url);
+    if (old && old.length) {
+      s.endpoints = old;
+      restored = true;
+    }
+  }
+  if (!restored) return;
+  const seen = new Set();
+  const merged = [];
+  const push = (ep) => {
+    const k = `${ep.server}:${ep.port ?? ''}`;
+    if (!seen.has(k)) {
+      seen.add(k);
+      merged.push(ep);
+    }
+  };
+  (next.literals || []).forEach(push);
+  next.sources.forEach((s) => (s.endpoints || []).forEach(push));
+  if (merged.length) next.endpoints = merged;
 }
 
 // The endpoints a dynamic entry should serve right now: the entry's
@@ -884,6 +929,21 @@ async function buildDedupHash(body) {
   return sha256Hex(JSON.stringify(normalized));
 }
 
+// Dynamic dedup identities are synthetic strings whose lines start
+// with `api:` / `mix:`. A static paste containing such a line could
+// hash-collide with a real dynamic identity and silently merge two
+// different entries into one, so static hash inputs carrying one get
+// a marker line no identity can contain (`static:` — identity lines
+// are endpoint renderings with numeric ports or https URLs). Ordinary
+// static text hashes exactly as before: existing entries keep
+// refreshing in place.
+function staticDedupText(text) {
+  const hasIdentityLine = normalizeLines(text)
+    .split('\n')
+    .some((l) => l.startsWith('api:') || l.startsWith('mix:'));
+  return hasIdentityLine ? `${text}\nstatic:` : text;
+}
+
 function sanitizeNote(value) {
   // Owner-written remark identifying an entry (e.g. which VPS it belongs to).
   return String(value ?? '')
@@ -1050,6 +1110,7 @@ async function handleGenerate(request, env, url) {
   const preferredEndpoints = [];
   const seenEp = new Set();
   const epKey = (ep) => `${ep.server}:${ep.port ?? ''}`;
+  const contributed = new Map(); // source url -> endpoints actually merged
   for (const line of mixed.lines) {
     if (line.url) {
       let key;
@@ -1060,6 +1121,7 @@ async function handleGenerate(request, env, url) {
         if (seenEp.has(epKey(ep))) continue;
         seenEp.add(epKey(ep));
         preferredEndpoints.push(ep);
+        contributed.set(key, (contributed.get(key) || 0) + 1);
       }
     } else {
       const ep = parsePreferredEndpoints(line.text)[0];
@@ -1154,6 +1216,8 @@ async function handleGenerate(request, env, url) {
       ? `api:${sourceUrls[0]}|${limit}`
       : `mix:${litPart}|${[...sourceUrls].sort().join('\n')}|${limit}`;
     dedupBody = { ...body, preferredIps: identity };
+  } else {
+    dedupBody = { ...body, preferredIps: staticDedupText(String(body.preferredIps || '')) };
   }
   const dedupHash = await buildDedupHash(dedupBody);
   const dedupKey = `dedup:${dedupHash}`;
@@ -1195,6 +1259,7 @@ async function handleGenerate(request, env, url) {
       // A dynamic entry re-generated against its source refreshes the
       // stored snapshot and base nodes (retention below restarts too).
       if (dynamic) {
+        carryOverFailedSnapshots(dynamic, record.dynamic, sourceResults);
         record.dynamic = dynamic;
         record.baseNodes = baseNodes;
         record.inputs = inputs;
@@ -1273,7 +1338,7 @@ async function handleGenerate(request, env, url) {
           sources: sourceResults.map((r) => ({
             url: r.url,
             total: r.total,
-            used: r.endpoints.slice(0, dynamic.limit).length,
+            used: contributed.get(r.url) || 0,
             fromCache: r.fromCache,
             error: r.error,
           })),

@@ -609,9 +609,14 @@ console.log('worker tests passed');
 {
   const realFetch = globalThis.fetch;
   let listA = '104.16.2.2\n104.16.2.3:8443\n104.16.2.4';
+  let downA = false;
   globalThis.fetch = async (url) => {
     const u = String(url);
-    if (u === 'https://a.example.com/l.txt') return new Response(listA, { status: 200 });
+    if (u === 'https://a.example.com/l.txt') {
+      if (downA) throw new Error('network down');
+      return new Response(listA, { status: 200 });
+    }
+    if (u === 'https://c.example.com/l.txt') return new Response(listA, { status: 200 });
     if (u === 'https://b.example.com/l.txt') return new Response('104.16.3.3\n104.16.2.3:8443', { status: 200 });
     if (u === 'https://dead.example.com/l.txt') throw new Error('network down');
     throw new Error('unexpected fetch ' + u);
@@ -630,6 +635,13 @@ console.log('worker tests passed');
     assert.ok(mix.warnings.some((w) => w.includes('2 个来源')), 'multi-source warning');
     const order = ['104.16.9.1', '104.16.2.2', '104.16.2.3', '104.16.3.3'].map((s) => mix.plainText.indexOf(s));
     assert.ok(order.every((v, i) => v >= 0 && (i === 0 || order[i - 1] < v)), 'merged in box order');
+
+    // Audit fix F4: a source whose list fully duplicates an earlier
+    // one reports used = 0 — it contributed nothing after dedupe.
+    const dupSrc = await generate({ nodeLinks: node, preferredIps: 'https://a.example.com/l.txt\nhttps://c.example.com/l.txt', sourceLimit: 10 });
+    assert.equal(dupSrc.counts.preferredEndpoints, 3);
+    assert.equal(dupSrc.dynamic.sources[0].used, 3, 'first source contributed all');
+    assert.equal(dupSrc.dynamic.sources[1].used, 0, 'fully-duplicated source contributed none');
 
     // Per-source test-fetch over the whole box.
     const tp = await worker.fetch(new Request('https://x.pages.dev/api/ip-source-test', {
@@ -704,6 +716,39 @@ console.log('worker tests passed');
     const six = await genRaw({ nodeLinks: node, preferredIps: [1, 2, 3, 4, 5, 6].map((i) => `https://s${i}.example.com/l.txt`).join('\n') });
     assert.equal(six.status, 400, 'six sources refused');
     assert.ok((await six.json()).error.includes('最多 5 个'), 'cap named in the error');
+
+    // Audit fix F2: a "#备注" typed after a source link is a remark,
+    // not part of the URL — both spellings are the same entry.
+    const fragA = await generate({ nodeLinks: node, preferredIps: 'https://a.example.com/l.txt#备注A' });
+    assert.equal(fragA.dynamic.sourceUrl, 'https://a.example.com/l.txt', 'fragment stripped from the stored source');
+    const fragB = await generate({ nodeLinks: node, preferredIps: 'https://a.example.com/l.txt#备注B' });
+    assert.equal(fragB.shortId, fragA.shortId, 'different remarks after a source link stay one entry');
+
+    // Audit fix F3: a static paste shaped like a dynamic identity
+    // must not merge with the real dynamic entry.
+    const crafted = await generate({ nodeLinks: node, preferredIps: 'api:https://a.example.com/l.txt|10' });
+    assert.equal(crafted.dynamic, null, 'crafted identity-shaped paste stays static');
+    const realDyn = await generate({ nodeLinks: node, preferredIps: 'https://a.example.com/l.txt' });
+    assert.notEqual(crafted.shortId, realDyn.shortId, 'crafted paste and lone-source entry are separate');
+    assert.ok(JSON.parse(store.get(`sub:${realDyn.shortId}`).value).dynamic, 'the real entry is dynamic');
+
+    // Audit fix F1: refreshing while a source is down (cache evicted)
+    // keeps its stored snapshot; /sub still serves it in the outage.
+    const keepBox = '104.16.9.1\nhttps://a.example.com/l.txt';
+    const keep1 = await generate({ nodeLinks: node, preferredIps: keepBox, sourceLimit: 2 });
+    const keptSnap = JSON.parse(store.get(`sub:${keep1.shortId}`).value).dynamic.sources[0].endpoints;
+    assert.ok(keptSnap.length > 0, 'snapshot seeded');
+    downA = true;
+    for (const k of [...store.keys()].filter((x) => x.startsWith('ipcache:'))) store.delete(k);
+    const keep2 = await generate({ nodeLinks: node, preferredIps: keepBox, sourceLimit: 2 });
+    assert.equal(keep2.shortId, keep1.shortId, 'down-refresh lands on the same entry');
+    const keptAfter = JSON.parse(store.get(`sub:${keep2.shortId}`).value).dynamic;
+    assert.deepEqual(keptAfter.sources[0].endpoints, keptSnap, 'failed source keeps its previous snapshot');
+    assert.ok(keptAfter.endpoints.some((e) => e.server === keptSnap[0].server), 'merged fallback keeps the snapshot too');
+    const subKept = await getSub(keep1.shortId, 'plain');
+    assert.ok(subKept.body.includes(keptSnap[0].server), 'sub serves the preserved snapshot during the outage');
+    assert.ok(subKept.body.includes('104.16.9.1'), 'literal still served');
+    downA = false;
     console.log('mixed suite: box parsing, ordered merge, per-source fallback, identity, guards: passed');
   } finally {
     globalThis.fetch = realFetch;
