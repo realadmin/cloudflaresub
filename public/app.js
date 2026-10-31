@@ -1222,6 +1222,8 @@ function openRetentionPanel(entry) {
   }
   panel.classList.remove('hidden');
   entry.classList.add('retention-open');
+  const btn = entry.querySelector('[data-admin-action="retention"]');
+  if (btn) btn.textContent = '收起';
 }
 
 function toggleRetentionPanel(entry) {
@@ -1234,6 +1236,8 @@ function closeRetentionPanel(entry) {
   const panel = entry?.querySelector('.entry-retention');
   if (panel) panel.classList.add('hidden');
   entry?.classList.remove('retention-open');
+  const btn = entry?.querySelector('[data-admin-action="retention"]');
+  if (btn) btn.textContent = '修改有效期';
 }
 
 document.addEventListener('change', (event) => {
@@ -1357,12 +1361,16 @@ function openTagsPanel(entry) {
   }
   panel.classList.remove('hidden');
   entry.classList.add('tags-open');
+  const btn = entry.querySelector('[data-admin-action="tags"]');
+  if (btn) btn.textContent = '收起';
 }
 
 function closeTagsPanel(entry) {
   const panel = entry?.querySelector('.entry-tags-panel');
   if (panel) panel.classList.add('hidden');
   entry?.classList.remove('tags-open');
+  const btn = entry?.querySelector('[data-admin-action="tags"]');
+  if (btn) btn.textContent = '标签';
 }
 
 function toggleTagsPanel(entry) {
