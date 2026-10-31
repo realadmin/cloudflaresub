@@ -966,6 +966,7 @@ button.small {
 }
 .admin-actions button {
   width: 100%;
+  font-size: 0.92rem; /* a little headroom so the longest label never crowds its cell */
 }
 .admin-actions [data-admin-action="retention"] {
   white-space: nowrap;
@@ -1115,6 +1116,9 @@ label {
 }
 .note-save-status[data-state="ok"] {
   color: #6ee7b7;
+}
+.note-save-status[data-state="warn"] {
+  color: #fbbf24;
 }
 .note-save-status[data-state="fail"] {
   color: #fca5a5;

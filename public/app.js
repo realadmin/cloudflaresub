@@ -851,6 +851,20 @@ async function pollEntry(id, token, predicate) {
 // a save queues the newest text instead of racing the in-flight write.
 const noteSaveStates = new Map();
 
+// The server's sanitizeNote, mirrored: dirty checks must compare the
+// text as it will be STORED, not the raw box contents — otherwise a
+// note containing a newline or edge spaces (easy to paste into the
+// multi-line box) never compares equal to its stored form and every
+// blur would re-post the identical note forever.
+function normalizeNoteText(value) {
+  const collapsed = String(value ?? '')
+    .replace(/[\r\n\t]+/g, ' ')
+    .trim()
+    .slice(0, 80);
+  const c = collapsed.charCodeAt(collapsed.length - 1);
+  return c >= 0xd800 && c <= 0xdbff ? collapsed.slice(0, -1) : collapsed;
+}
+
 function noteSaveState(id) {
   let state = noteSaveStates.get(id);
   if (!state) {
@@ -901,6 +915,7 @@ function setNoteSaveStatus(id, text, state = '', transientMs = 0) {
 }
 
 function requestNoteSave(id, value) {
+  value = normalizeNoteText(value);
   const saveState = noteSaveState(id);
   const item = adminItems.get(id);
   if (!item) return Promise.resolve(false);
@@ -927,7 +942,8 @@ function requestNoteSave(id, value) {
       if (savingValue === currentItem.note) continue;
       const previousNote = currentItem.note || '';
       setNoteSaveStatus(id, '正在保存备注…', 'saving');
-      let ok = false;
+      let postOk = false;
+      let verified = false;
       let savedNote = savingValue;
       let errMsg = '';
       try {
@@ -935,19 +951,24 @@ function requestNoteSave(id, value) {
         const resp = await postJson('/api/note', { id, note: savingValue, token });
         const data = await resp.json().catch(() => null);
         if (resp.ok && data?.ok) {
+          postOk = true;
           savedNote = typeof data.note === 'string' ? data.note : savingValue;
           // Verify against KV itself via the direct record read, never
           // the lagging list (the rule the old save button followed).
-          ok = !!(await pollEntry(id, token, (entry) => (entry.note || '') === savedNote));
+          verified = !!(await pollEntry(id, token, (entry) => (entry.note || '') === savedNote));
         } else {
           errMsg = (data && data.error) || '保存失败';
         }
       } catch (e) {
-        ok = false;
+        postOk = false;
       }
       const latestItem = adminItems.get(id);
       if (!latestItem) break;
-      if (ok) {
+      if (postOk) {
+        // The server acknowledged the write, so the note IS stored —
+        // even when the read-back could not confirm it in time. Only
+        // the wording differs: green success is reserved for a verified
+        // read-back; an unverified save says so instead of crying failure.
         latestItem.note = savedNote;
         anySaved = true;
         // If the list re-rendered during the save, bring a stale,
@@ -958,9 +979,12 @@ function requestNoteSave(id, value) {
           valueToSave = saveState.pendingValue;
           saveState.pendingValue = null;
           setNoteSaveStatus(id, '输入完成后自动保存', 'pending');
-        } else {
+        } else if (verified) {
           saveState.pendingValue = null;
           setNoteSaveStatus(id, '备注保存成功', 'ok', 1500);
+        } else {
+          saveState.pendingValue = null;
+          setNoteSaveStatus(id, '备注已保存，待刷新确认', 'warn', 2500);
         }
       } else if (saveState.pendingValue !== null && saveState.pendingValue !== savingValue) {
         valueToSave = saveState.pendingValue;
@@ -987,7 +1011,7 @@ function scheduleNoteAutosave(box, delay = 900) {
   saveState.timer = null;
   const item = adminItems.get(id);
   if (!item) return;
-  if (box.value === item.note && !saveState.saving) {
+  if (normalizeNoteText(box.value) === item.note && !saveState.saving) {
     setNoteSaveStatus(id, '');
     return;
   }
