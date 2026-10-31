@@ -627,7 +627,7 @@ function renderAdminList() {
       return `<div class="entry" data-id="${escapeHtml(item.id)}">
         <div class="entry-row">
           <div class="cell"><input type="checkbox" class="entry-check" aria-label="选择这条" ${adminState.selected.has(item.id) ? 'checked' : ''} /></div>
-          <div class="cell"><textarea class="note-input" maxlength="80" rows="4" placeholder="（未填备注）">${escapeHtml(item.note || '')}</textarea>${entryTagsHtml(item)}</div>
+          <div class="cell note-cell"><textarea class="note-input" maxlength="80" rows="4" placeholder="（未填备注）">${escapeHtml(item.note || '')}</textarea><div class="note-save-status" role="status" aria-live="polite"></div>${entryTagsHtml(item)}</div>
           <div class="cell">${escapeHtml(created)}</div>
           <div class="cell">${retention}</div>
           <div class="cell">${escapeHtml((item.sources || []).join(', ') || '-')}${item.dynamic ? `<br><span class="hint">动态订阅 · ${item.sourceCount > 1 ? `${item.sourceCount} 个来源跟随更新` : '跟随来源更新'}</span>` : ''}</div>
@@ -635,7 +635,6 @@ function renderAdminList() {
           <div class="cell">
             <div class="admin-actions">
               <button type="button" class="secondary small" data-admin-action="links">链接</button>
-              <button type="button" class="secondary small" data-admin-action="save">存备注</button>
               <button type="button" class="secondary small" data-admin-action="tags">标签</button>
               <button type="button" class="secondary small" data-admin-action="retention">修改有效期</button>
               <button type="button" class="secondary small" data-admin-action="delete">删除</button>
@@ -703,6 +702,7 @@ if (deleteSelectedBtn) {
     if (!ids.length) return;
     if (!confirm(`确定删除选中的 ${ids.length} 条订阅吗？删除后它们的链接会立刻失效。`)) return;
     deleteSelectedBtn.disabled = true;
+    await settleNoteAutosaves(ids);
     let done = 0;
     const failed = [];
     for (let k = 0; k < ids.length; k++) {
@@ -721,6 +721,7 @@ if (deleteSelectedBtn) {
         done++;
         adminState.items = adminState.items.filter((i) => i.id !== id);
         adminItems.delete(id);
+        noteSaveStates.delete(id);
         adminState.selected.delete(id);
       } else {
         failed.push(id);
@@ -815,6 +816,7 @@ if (expandAllBtn) {
     for (const entry of adminBody.querySelectorAll('.entry')) {
       await setDetail(entry, true);
       openRetentionPanel(entry);
+      openTagsPanel(entry);
     }
   });
 }
@@ -823,6 +825,7 @@ if (collapseAllBtn) {
     for (const entry of adminBody.querySelectorAll('.entry')) {
       await setDetail(entry, false);
       closeRetentionPanel(entry);
+      closeTagsPanel(entry);
     }
   });
 }
@@ -839,6 +842,226 @@ async function pollEntry(id, token, predicate) {
     } catch {}
   }
   return null;
+}
+
+// ---------------- Note autosave ----------------
+// Notes save themselves: a short pause after typing (or leaving the
+// field) posts the new note, and only the direct KV read-back may show
+// the success note. Saves for one entry are serialized — typing during
+// a save queues the newest text instead of racing the in-flight write.
+const noteSaveStates = new Map();
+
+function noteSaveState(id) {
+  let state = noteSaveStates.get(id);
+  if (!state) {
+    state = {
+      timer: null,
+      statusTimer: null,
+      statusSeq: 0,
+      saving: false,
+      pendingValue: null,
+      composing: false,
+      finishOnCompositionEnd: false,
+      promise: null,
+    };
+    noteSaveStates.set(id, state);
+  }
+  return state;
+}
+
+function noteEntryElement(id) {
+  return [...adminBody.querySelectorAll('.entry')].find((entry) => entry.dataset.id === id) || null;
+}
+
+function setNoteSaveStatus(id, text, state = '', transientMs = 0) {
+  const saveState = noteSaveState(id);
+  const seq = ++saveState.statusSeq;
+  if (saveState.statusTimer) {
+    clearTimeout(saveState.statusTimer);
+    saveState.statusTimer = null;
+  }
+  const el = noteEntryElement(id)?.querySelector('.note-save-status');
+  if (el) {
+    el.textContent = text;
+    if (state) el.dataset.state = state;
+    else delete el.dataset.state;
+    el.classList.toggle('is-visible', !!text);
+  }
+  if (transientMs) {
+    saveState.statusTimer = setTimeout(() => {
+      if (saveState.statusSeq !== seq) return;
+      const current = noteEntryElement(id)?.querySelector('.note-save-status');
+      if (current) {
+        current.textContent = '';
+        delete current.dataset.state;
+        current.classList.remove('is-visible');
+      }
+    }, transientMs);
+  }
+}
+
+function requestNoteSave(id, value) {
+  const saveState = noteSaveState(id);
+  const item = adminItems.get(id);
+  if (!item) return Promise.resolve(false);
+  if (value === item.note) {
+    if (!saveState.saving) setNoteSaveStatus(id, '');
+    return Promise.resolve(true);
+  }
+  if (saveState.saving) {
+    saveState.pendingValue = value;
+    setNoteSaveStatus(id, '输入完成后自动保存', 'pending');
+    return saveState.promise;
+  }
+
+  saveState.saving = true;
+  saveState.promise = (async () => {
+    let valueToSave = value;
+    let anySaved = false;
+    while (valueToSave !== null) {
+      const savingValue = valueToSave;
+      valueToSave = null;
+      saveState.pendingValue = null;
+      const currentItem = adminItems.get(id);
+      if (!currentItem) break;
+      if (savingValue === currentItem.note) continue;
+      const previousNote = currentItem.note || '';
+      setNoteSaveStatus(id, '正在保存备注…', 'saving');
+      let ok = false;
+      let savedNote = savingValue;
+      let errMsg = '';
+      try {
+        const token = adminToken();
+        const resp = await postJson('/api/note', { id, note: savingValue, token });
+        const data = await resp.json().catch(() => null);
+        if (resp.ok && data?.ok) {
+          savedNote = typeof data.note === 'string' ? data.note : savingValue;
+          // Verify against KV itself via the direct record read, never
+          // the lagging list (the rule the old save button followed).
+          ok = !!(await pollEntry(id, token, (entry) => (entry.note || '') === savedNote));
+        } else {
+          errMsg = (data && data.error) || '保存失败';
+        }
+      } catch (e) {
+        ok = false;
+      }
+      const latestItem = adminItems.get(id);
+      if (!latestItem) break;
+      if (ok) {
+        latestItem.note = savedNote;
+        anySaved = true;
+        // If the list re-rendered during the save, bring a stale,
+        // unfocused editor up to date without disturbing active typing.
+        const box = noteEntryElement(id)?.querySelector('.note-input');
+        if (box && document.activeElement !== box && box.value === previousNote) box.value = savedNote;
+        if (saveState.pendingValue !== null && saveState.pendingValue !== savedNote) {
+          valueToSave = saveState.pendingValue;
+          saveState.pendingValue = null;
+          setNoteSaveStatus(id, '输入完成后自动保存', 'pending');
+        } else {
+          saveState.pendingValue = null;
+          setNoteSaveStatus(id, '备注保存成功', 'ok', 1500);
+        }
+      } else if (saveState.pendingValue !== null && saveState.pendingValue !== savingValue) {
+        valueToSave = saveState.pendingValue;
+        saveState.pendingValue = null;
+      } else {
+        saveState.pendingValue = null;
+        setNoteSaveStatus(id, errMsg ? `备注保存失败：${errMsg}` : '备注保存失败，请重试', 'fail', 2500);
+      }
+    }
+    saveState.saving = false;
+    saveState.promise = null;
+    return anySaved;
+  })();
+  return saveState.promise;
+}
+
+function scheduleNoteAutosave(box, delay = 900) {
+  const entry = box.closest('.entry');
+  const id = entry?.dataset.id;
+  if (!id) return;
+  const saveState = noteSaveState(id);
+  if (saveState.composing) return;
+  if (saveState.timer) clearTimeout(saveState.timer);
+  saveState.timer = null;
+  const item = adminItems.get(id);
+  if (!item) return;
+  if (box.value === item.note && !saveState.saving) {
+    setNoteSaveStatus(id, '');
+    return;
+  }
+  setNoteSaveStatus(id, '输入完成后自动保存', 'pending');
+  saveState.timer = setTimeout(() => {
+    saveState.timer = null;
+    requestNoteSave(id, box.value);
+  }, delay);
+}
+
+function finishNoteInput(box) {
+  const entry = box.closest('.entry');
+  const id = entry?.dataset.id;
+  if (!id) return;
+  const saveState = noteSaveState(id);
+  if (saveState.composing) {
+    saveState.finishOnCompositionEnd = true;
+    return;
+  }
+  if (saveState.timer) {
+    clearTimeout(saveState.timer);
+    saveState.timer = null;
+  }
+  requestNoteSave(id, box.value);
+}
+
+function cancelNoteAutosave(id) {
+  const saveState = noteSaveStates.get(id);
+  if (!saveState) return;
+  if (saveState.timer) clearTimeout(saveState.timer);
+  saveState.timer = null;
+  saveState.pendingValue = null;
+  saveState.finishOnCompositionEnd = false;
+}
+
+// Deletes must not race a note write: cancel queued saves and let an
+// in-flight one land before the record is removed, so its putRecord
+// can never resurrect a just-deleted entry.
+async function settleNoteAutosaves(ids) {
+  ids.forEach(cancelNoteAutosave);
+  await Promise.all(ids.map((id) => noteSaveStates.get(id)?.promise).filter(Boolean).map((p) => p.catch(() => {})));
+}
+
+if (adminBody) {
+  adminBody.addEventListener('input', (event) => {
+    const box = event.target.closest?.('.note-input');
+    if (box) scheduleNoteAutosave(box);
+  });
+  adminBody.addEventListener('focusout', (event) => {
+    const box = event.target.closest?.('.note-input');
+    if (box) finishNoteInput(box);
+  });
+  adminBody.addEventListener('compositionstart', (event) => {
+    const box = event.target.closest?.('.note-input');
+    if (!box) return;
+    const saveState = noteSaveState(box.closest('.entry')?.dataset.id || '');
+    saveState.composing = true;
+    if (saveState.timer) {
+      clearTimeout(saveState.timer);
+      saveState.timer = null;
+    }
+  });
+  adminBody.addEventListener('compositionend', (event) => {
+    const box = event.target.closest?.('.note-input');
+    if (!box) return;
+    const saveState = noteSaveState(box.closest('.entry')?.dataset.id || '');
+    saveState.composing = false;
+    if (saveState.finishOnCompositionEnd) {
+      saveState.finishOnCompositionEnd = false;
+      finishNoteInput(box);
+    } else {
+      scheduleNoteAutosave(box, 500);
+    }
+  });
 }
 
 // Load an entry's stored inputs back into the generate form for editing.
@@ -910,47 +1133,10 @@ document.addEventListener('click', async (event) => {
     await setDetail(entry, !entry.classList.contains('expanded'));
     return;
   }
-  if (action === 'save') {
-    const rawNote = entry.querySelector('.note-input')?.value || '';
-    btn.disabled = true;
-    btn.removeAttribute('data-save-state');
-    btn.textContent = '保存中…';
-    let ok = false;
-    let savedNote = rawNote;
-    let errMsg = '';
-    try {
-      const resp = await postJson('/api/note', { id, note: rawNote, token });
-      const data = await resp.json();
-      if (resp.ok && data.ok) {
-        savedNote = typeof data.note === 'string' ? data.note : rawNote;
-        // Verify against KV itself: read the record back directly and
-        // compare notes (poll briefly; KV is eventually consistent).
-        ok = !!(await pollEntry(id, token, (e) => (e.note || '') === savedNote));
-      } else {
-        errMsg = data.error || '保存失败';
-      }
-    } catch (e) {
-      ok = false;
-    }
-    if (ok) {
-      const item = adminItems.get(id);
-      if (item) item.note = savedNote;
-      adminMsg.textContent = `条目 ${id} 的备注已保存并在 KV 中确认。`;
-    } else {
-      adminMsg.textContent = errMsg || `条目 ${id} 的备注未能确认保存，请重试。`;
-    }
-    btn.textContent = ok ? '成功' : '失败';
-    btn.dataset.saveState = ok ? 'ok' : 'fail';
-    setTimeout(() => {
-      btn.textContent = '存备注';
-      btn.disabled = false;
-      btn.removeAttribute('data-save-state');
-    }, 1500);
-    return;
-  }
   if (action === 'delete') {
     const note = entry.querySelector('.note-input')?.value || id;
     if (!confirm(`确定删除条目「${note}」吗？删除后它的订阅链接会立刻失效。`)) return;
+    await settleNoteAutosaves([id]);
     let data = null;
     try {
       const resp = await postJson('/api/delete', { id, token });
@@ -964,6 +1150,7 @@ document.addEventListener('click', async (event) => {
       // showing it until the next manual reload.
       adminState.items = adminState.items.filter((i) => i.id !== id);
       adminItems.delete(id);
+      noteSaveStates.delete(id);
       renderAdminList();
       adminMsg.textContent = `条目 ${id} 已删除。共 ${adminState.items.length} 条。`;
     } else {

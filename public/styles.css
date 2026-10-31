@@ -739,7 +739,8 @@ button.small {
    arrives, the previous row rides away with the end of its own block and
    the new one takes its place (and vice versa scrolling up). */
 .entry.expanded .entry-row,
-.entry.retention-open .entry-row {
+.entry.retention-open .entry-row,
+.entry.tags-open .entry-row {
   position: sticky;
   top: 10px;
   z-index: 30;
@@ -947,7 +948,8 @@ button.small {
     min-width: 936px;
   }
   .entry.expanded .entry-row,
-  .entry.retention-open .entry-row {
+  .entry.retention-open .entry-row,
+  .entry.tags-open .entry-row {
     position: static;
     box-shadow: none;
   }
@@ -964,6 +966,11 @@ button.small {
 }
 .admin-actions button {
   width: 100%;
+}
+.admin-actions [data-admin-action="retention"] {
+  white-space: nowrap;
+  padding-left: 8px;
+  padding-right: 8px;
 }
 .admin-actions .span-all {
   grid-column: 1 / -1;
@@ -1016,6 +1023,12 @@ label {
   .admin-actions {
     gap: 14px 12px;
   }
+  /* Keep the longest action label on one line without shrinking the
+     48px touch height: trade horizontal padding, not vertical room. */
+  .admin-actions [data-admin-action="retention"] {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
 
   .sub-actions {
     gap: 12px;
@@ -1065,7 +1078,7 @@ label {
   }
 }
 
-/* Save-note feedback states on the button itself */
+/* Save feedback states on panel save buttons */
 #adminSection button[data-save-state="ok"] {
   border-color: rgba(52, 211, 153, 0.65);
   color: #6ee7b7;
@@ -1073,6 +1086,39 @@ label {
 #adminSection button[data-save-state="fail"] {
   border-color: rgba(248, 113, 113, 0.65);
   color: #fca5a5;
+}
+
+/* Note autosave: the cell is a vertical stack (editor, one reserved
+   status line, tag chips) so a status appearing never shifts the row. */
+.entry-row .note-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+#adminSection .note-cell .note-input {
+  flex: 1 1 auto;
+  height: auto;
+}
+.note-save-status {
+  min-height: 1.35em;
+  font-size: 0.82rem;
+  line-height: 1.35;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+  transition: opacity 0.18s ease, color 0.18s ease;
+}
+.note-save-status.is-visible {
+  opacity: 1;
+}
+.note-save-status[data-state="ok"] {
+  color: #6ee7b7;
+}
+.note-save-status[data-state="fail"] {
+  color: #fca5a5;
+  white-space: normal;
 }
 
 /* ---- Inline retention edit panel ---- */
