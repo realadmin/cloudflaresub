@@ -1337,7 +1337,7 @@ function buildTagsPanel(item) {
     <div class="ret-controls">
       <input class="tags-edit-input" type="text" placeholder="输入新标签，回车或点「添加」" />
       <button type="button" class="secondary small" data-tags-add>添加</button>
-      <button type="button" class="secondary small" data-tags-save>保存标签</button>
+      <button type="button" class="secondary small" data-tags-save>保存</button>
       <button type="button" class="secondary small" data-tags-cancel>取消</button>
     </div>
     <div class="tags-edit-suggest tag-suggestions"></div>
@@ -1460,7 +1460,7 @@ document.addEventListener('click', async (event) => {
     adminMsg.textContent = `条目 ${id} 的标签未能确认保存，请重试。`;
   }
   setTimeout(() => {
-    saveBtn.textContent = '保存标签';
+    saveBtn.textContent = '保存';
     saveBtn.disabled = false;
     saveBtn.removeAttribute('data-save-state');
     if (ok) {
