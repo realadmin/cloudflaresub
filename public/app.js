@@ -88,7 +88,97 @@ if (storageModeSelect && retentionDaysInput) {
   });
 }
 
+// ---------------- Generate-form tag picker ----------------
+// Selected tags ride along with the generate request ONLY when the
+// owner actually touched the picker (added/removed a chip, or a
+// backfill loaded an entry's tags). Untouched = the field is omitted,
+// and the server then leaves a refreshed entry's tags alone.
+const genTagChips = byId('genTagChips');
+const genTagInput = byId('tagInput');
+const genTagSuggestions = byId('genTagSuggestions');
+let genTags = [];
+let genTagsTouched = false;
+let genTagVocab = null; // [{tag, count}] from GET /api/tags, lazy
+
+function renderGenTagSuggestions() {
+  if (!genTagSuggestions) return;
+  const vocab = (genTagVocab || []).filter(
+    (v) => !genTags.some((t) => t.toLowerCase() === String(v.tag).toLowerCase()),
+  );
+  genTagSuggestions.innerHTML = vocab
+    .map((v) => `<button type="button" class="tag-chip tag-chip-pick" data-gen-tag-pick="${escapeHtml(v.tag)}">${escapeHtml(v.tag)} · ${v.count}</button>`)
+    .join('');
+}
+
+function renderGenTags() {
+  if (genTagChips) {
+    genTagChips.innerHTML = genTags
+      .map((t, i) => `<span class="tag-chip">${escapeHtml(t)}<button type="button" class="tag-chip-x" data-gen-tag-remove="${i}" aria-label="移除标签 ${escapeHtml(t)}">×</button></span>`)
+      .join('');
+  }
+  renderGenTagSuggestions();
+}
+
+function addGenTag(raw) {
+  const tag = String(raw || '').replace(/\s+/g, ' ').trim().slice(0, 24).trim();
+  if (!tag) return;
+  if (genTags.length >= 10) return;
+  if (genTags.some((t) => t.toLowerCase() === tag.toLowerCase())) return;
+  genTags.push(tag);
+  genTagsTouched = true;
+  renderGenTags();
+}
+
+function setGenTags(tags, touched) {
+  genTags = Array.isArray(tags) ? [...tags] : [];
+  genTagsTouched = !!touched;
+  if (genTagInput) genTagInput.value = '';
+  renderGenTags();
+}
+
+async function loadGenTagVocab() {
+  if (genTagVocab) return;
+  const token = adminToken();
+  if (!token) return;
+  try {
+    const resp = await fetch('/api/tags', { headers: { 'x-admin-token': token } });
+    const data = await resp.json();
+    if (resp.ok && data.ok) {
+      genTagVocab = data.tags || [];
+      renderGenTagSuggestions();
+    }
+  } catch {}
+}
+
+if (genTagInput) {
+  genTagInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' || event.key === ',') {
+      event.preventDefault();
+      addGenTag(genTagInput.value);
+      genTagInput.value = '';
+    }
+  });
+  genTagInput.addEventListener('focus', loadGenTagVocab);
+}
+if (genTagChips) {
+  genTagChips.addEventListener('click', (event) => {
+    const btn = event.target.closest('[data-gen-tag-remove]');
+    if (!btn) return;
+    genTags.splice(Number(btn.dataset.genTagRemove), 1);
+    genTagsTouched = true;
+    renderGenTags();
+  });
+}
+if (genTagSuggestions) {
+  genTagSuggestions.addEventListener('click', (event) => {
+    const btn = event.target.closest('[data-gen-tag-pick]');
+    if (!btn) return;
+    addGenTag(btn.dataset.genTagPick);
+  });
+}
+
 fillDemoBtn.addEventListener('click', () => {
+  setGenTags([], false);
   byId('nodeLinks').value = demoVmess;
   byId('preferredIps').value = demoIps;
   byId('namePrefix').value = 'CF';
@@ -110,6 +200,9 @@ form.addEventListener('submit', async (event) => {
     // owner keeps in the admin section's token box below.
     token: adminToken(),
     note: byId('subNote')?.value || '',
+    // Only sent when the tag picker was touched (see its section):
+    // untouched must leave a refreshed entry's tags unchanged.
+    ...(genTagsTouched ? { tags: [...genTags] } : {}),
     storageMode: byId('storageMode')?.value || 'permanent',
     retentionDays: Number(byId('retentionDays')?.value || 30),
   };
@@ -262,7 +355,18 @@ const collapseAllBtn = byId('collapseAllBtn');
 const selectAllCheckbox = byId('selectAllEntries');
 const deleteSelectedBtn = byId('deleteSelectedBtn');
 const adminItems = new Map();
-const adminState = { items: [], sort: 'created-desc', query: '', selected: new Set() };
+const adminState = {
+  items: [],
+  sort: 'created-desc',
+  query: '',
+  selected: new Set(),
+  // Tag filter: a set of tag spellings plus the multi-tag mode the
+  // owner picked ('and' = entry must carry every selected tag,
+  // 'or' = any one suffices). Survives list reloads (it is a view
+  // preference); selections whose tag vanished are pruned on render.
+  tagSelected: new Set(),
+  tagMode: 'and',
+};
 
 if (adminTokenInput && sessionStorage.getItem('cfsub_admin_token')) {
   adminTokenInput.value = sessionStorage.getItem('cfsub_admin_token');
@@ -329,16 +433,30 @@ function sortedAdminItems() {
 function itemMatchesQuery(item, needle) {
   if (!needle) return true;
   if ((item.note || '').toLowerCase().includes(needle)) return true;
+  if ((item.tags || []).some((t) => String(t).toLowerCase().includes(needle))) return true;
   return (item.sources || []).some((s) => String(s).toLowerCase().includes(needle));
+}
+
+function itemMatchesTags(item) {
+  const sel = [...adminState.tagSelected];
+  if (!sel.length) return true;
+  const own = new Set((item.tags || []).map((t) => String(t).toLowerCase()));
+  return adminState.tagMode === 'or'
+    ? sel.some((t) => own.has(t.toLowerCase()))
+    : sel.every((t) => own.has(t.toLowerCase()));
 }
 
 function visibleAdminItems() {
   const needle = (adminState.query || '').trim().toLowerCase();
-  return sortedAdminItems().filter((item) => itemMatchesQuery(item, needle));
+  return sortedAdminItems().filter((item) => itemMatchesQuery(item, needle) && itemMatchesTags(item));
 }
 
 function updateAdminCount() {
   const total = adminState.items.length;
+  if (adminState.tagSelected.size) {
+    adminMsg.textContent = `共 ${total} 条，筛选到 ${visibleAdminItems().length} 条。`;
+    return;
+  }
   if (!(adminState.query || '').trim()) {
     adminMsg.textContent = `共 ${total} 条。`;
     return;
@@ -363,6 +481,89 @@ function updateSelectionUI() {
   }
 }
 
+// ---------------- Tag filter bar ----------------
+const tagFilterBar = byId('tagFilterBar');
+const tagFilterChips = byId('tagFilterChips');
+const tagFilterClear = byId('tagFilterClear');
+const tagModeAndBtn = byId('tagModeAnd');
+const tagModeOrBtn = byId('tagModeOr');
+
+function allTagCounts() {
+  const counts = new Map();
+  for (const item of adminState.items) {
+    for (const t of item.tags || []) counts.set(t, (counts.get(t) || 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([tag, count]) => ({ tag, count }))
+    .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag, 'zh-Hans-CN'));
+}
+
+function entryTagsHtml(item) {
+  const tags = item.tags || [];
+  if (!tags.length) return '';
+  return `<div class="entry-tags">${tags.map((t) => `<button type="button" class="tag-chip tag-chip-mini${adminState.tagSelected.has(t) ? ' is-on' : ''}" data-tag-filter="${escapeHtml(t)}" title="按此标签筛选">${escapeHtml(t)}</button>`).join('')}</div>`;
+}
+
+function renderTagFilterBar() {
+  if (!tagFilterBar || !tagFilterChips) return;
+  const vocab = allTagCounts();
+  const names = new Set(vocab.map((v) => v.tag.toLowerCase()));
+  for (const t of [...adminState.tagSelected]) {
+    if (!names.has(t.toLowerCase())) adminState.tagSelected.delete(t);
+  }
+  tagFilterBar.classList.toggle('hidden', vocab.length === 0);
+  if (!vocab.length) return;
+  tagFilterChips.innerHTML = vocab
+    .map((v) => `<button type="button" class="tag-chip tag-chip-filter${adminState.tagSelected.has(v.tag) ? ' is-on' : ''}" data-tag-filter="${escapeHtml(v.tag)}">${escapeHtml(v.tag)} · ${v.count}</button>`)
+    .join('');
+  if (tagFilterClear) tagFilterClear.classList.toggle('hidden', adminState.tagSelected.size === 0);
+  if (tagModeAndBtn) tagModeAndBtn.classList.toggle('is-active', adminState.tagMode === 'and');
+  if (tagModeOrBtn) tagModeOrBtn.classList.toggle('is-active', adminState.tagMode === 'or');
+}
+
+function toggleTagFilter(tag) {
+  if (adminState.tagSelected.has(tag)) adminState.tagSelected.delete(tag);
+  else adminState.tagSelected.add(tag);
+  adminState.selected.clear();
+  renderAdminList();
+  updateAdminCount();
+}
+
+if (tagFilterChips) {
+  tagFilterChips.addEventListener('click', (event) => {
+    const btn = event.target.closest('[data-tag-filter]');
+    if (btn) toggleTagFilter(btn.dataset.tagFilter);
+  });
+}
+if (adminBody) {
+  adminBody.addEventListener('click', (event) => {
+    const btn = event.target.closest('[data-tag-filter]');
+    if (btn) toggleTagFilter(btn.dataset.tagFilter);
+  });
+}
+if (tagFilterClear) {
+  tagFilterClear.addEventListener('click', () => {
+    adminState.tagSelected.clear();
+    adminState.selected.clear();
+    renderAdminList();
+    updateAdminCount();
+  });
+}
+if (tagModeAndBtn) {
+  tagModeAndBtn.addEventListener('click', () => {
+    adminState.tagMode = 'and';
+    renderAdminList();
+    updateAdminCount();
+  });
+}
+if (tagModeOrBtn) {
+  tagModeOrBtn.addEventListener('click', () => {
+    adminState.tagMode = 'or';
+    renderAdminList();
+    updateAdminCount();
+  });
+}
+
 function retentionDaysText(st) {
   // Days reach innerHTML in the retention cell/panel: coerce to a plain
   // number so even a hand-corrupted record cannot inject markup there.
@@ -378,6 +579,7 @@ function retentionHtml(item) {
 }
 
 function renderAdminList() {
+  renderTagFilterBar();
   adminItems.clear();
   adminState.items.forEach((item) => adminItems.set(item.id, item));
   for (const id of [...adminState.selected]) {
@@ -401,7 +603,7 @@ function renderAdminList() {
       return `<div class="entry" data-id="${escapeHtml(item.id)}">
         <div class="entry-row">
           <div class="cell"><input type="checkbox" class="entry-check" aria-label="选择这条" ${adminState.selected.has(item.id) ? 'checked' : ''} /></div>
-          <div class="cell"><textarea class="note-input" maxlength="80" rows="4" placeholder="（未填备注）">${escapeHtml(item.note || '')}</textarea></div>
+          <div class="cell"><textarea class="note-input" maxlength="80" rows="4" placeholder="（未填备注）">${escapeHtml(item.note || '')}</textarea>${entryTagsHtml(item)}</div>
           <div class="cell">${escapeHtml(created)}</div>
           <div class="cell">${retention}</div>
           <div class="cell">${escapeHtml((item.sources || []).join(', ') || '-')}${item.dynamic ? `<br><span class="hint">动态订阅 · ${item.sourceCount > 1 ? `${item.sourceCount} 个来源跟随更新` : '跟随来源更新'}</span>` : ''}</div>
@@ -410,6 +612,7 @@ function renderAdminList() {
             <div class="admin-actions">
               <button type="button" class="secondary small" data-admin-action="links">链接</button>
               <button type="button" class="secondary small" data-admin-action="save">存备注</button>
+              <button type="button" class="secondary small" data-admin-action="tags">标签</button>
               <button type="button" class="secondary small" data-admin-action="retention">修改有效期</button>
               <button type="button" class="secondary small" data-admin-action="delete">删除</button>
               <button type="button" class="secondary small span-all" data-admin-action="backfill">回填到生成区</button>
@@ -633,6 +836,7 @@ function fillGenerateForm(bf) {
   const keep = byId('keepOriginalHost');
   if (keep) keep.checked = bf.keepOriginalHost !== false;
   setValue('subNote', bf.note);
+  setGenTags(bf.tags, Array.isArray(bf.tags));
   const mode = byId('storageMode');
   if (mode) {
     mode.value = bf.storage?.mode === 'days' ? 'days' : 'permanent';
@@ -672,6 +876,10 @@ document.addEventListener('click', async (event) => {
   }
   if (action === 'retention') {
     toggleRetentionPanel(entry);
+    return;
+  }
+  if (action === 'tags') {
+    toggleTagsPanel(entry);
     return;
   }
   if (action === 'links') {
@@ -866,6 +1074,163 @@ document.addEventListener('click', async (event) => {
     saveBtn.disabled = false;
     saveBtn.removeAttribute('data-save-state');
     if (ok) closeRetentionPanel(entry);
+  }, 1500);
+});
+
+// ---------------- Entry tags edit panel (inline, mirrors retention) ----------------
+function renderTagsPanel(panel) {
+  const chips = panel.querySelector('.tags-edit-chips');
+  if (chips) {
+    chips.innerHTML = panel._tags.length
+      ? panel._tags.map((t, i) => `<span class="tag-chip">${escapeHtml(t)}<button type="button" class="tag-chip-x" data-tags-remove="${i}" aria-label="移除标签 ${escapeHtml(t)}">×</button></span>`).join('')
+      : '<span class="hint">暂无标签</span>';
+  }
+  const sugg = panel.querySelector('.tags-edit-suggest');
+  if (sugg) {
+    const vocab = allTagCounts().filter((v) => !panel._tags.some((t) => t.toLowerCase() === v.tag.toLowerCase()));
+    sugg.innerHTML = vocab
+      .map((v) => `<button type="button" class="tag-chip tag-chip-pick" data-tags-pick="${escapeHtml(v.tag)}">${escapeHtml(v.tag)} · ${v.count}</button>`)
+      .join('');
+  }
+}
+
+function buildTagsPanel(item) {
+  const panel = document.createElement('div');
+  panel.className = 'entry-tags-panel hidden';
+  panel.innerHTML = `
+    <div class="tags-edit-chips tag-chips"></div>
+    <div class="ret-controls">
+      <input class="tags-edit-input" type="text" placeholder="输入新标签，回车或点「添加」" />
+      <button type="button" class="secondary small" data-tags-add>添加</button>
+      <button type="button" class="secondary small" data-tags-save>保存标签</button>
+      <button type="button" class="secondary small" data-tags-cancel>取消</button>
+    </div>
+    <div class="tags-edit-suggest tag-suggestions"></div>
+    <p class="hint">每条最多 10 个标签，单个最长 24 字；点下方已有标签可直接选用。保存后会回读 KV 确认。</p>`;
+  panel._tags = [...(item.tags || [])];
+  renderTagsPanel(panel);
+  return panel;
+}
+
+function openTagsPanel(entry) {
+  const item = adminItems.get(entry?.dataset.id || '');
+  if (!entry || !item) return;
+  let panel = entry.querySelector('.entry-tags-panel');
+  if (!panel) {
+    panel = buildTagsPanel(item);
+    entry.querySelector('.entry-row').after(panel);
+  }
+  panel.classList.remove('hidden');
+  entry.classList.add('tags-open');
+}
+
+function closeTagsPanel(entry) {
+  const panel = entry?.querySelector('.entry-tags-panel');
+  if (panel) panel.classList.add('hidden');
+  entry?.classList.remove('tags-open');
+}
+
+function toggleTagsPanel(entry) {
+  const panel = entry?.querySelector('.entry-tags-panel');
+  if (panel && !panel.classList.contains('hidden')) closeTagsPanel(entry);
+  else openTagsPanel(entry);
+}
+
+function addTagToPanel(panel, raw) {
+  const tag = String(raw || '').replace(/\s+/g, ' ').trim().slice(0, 24).trim();
+  if (!tag || panel._tags.length >= 10) return;
+  if (panel._tags.some((t) => t.toLowerCase() === tag.toLowerCase())) return;
+  panel._tags.push(tag);
+  renderTagsPanel(panel);
+}
+
+document.addEventListener('keydown', (event) => {
+  const input = event.target.closest?.('.tags-edit-input');
+  if (!input || event.key !== 'Enter') return;
+  event.preventDefault();
+  const panel = input.closest('.entry-tags-panel');
+  if (panel) {
+    addTagToPanel(panel, input.value);
+    input.value = '';
+  }
+});
+
+document.addEventListener('click', async (event) => {
+  const panel = event.target.closest?.('.entry-tags-panel');
+  if (!panel) return;
+  const entry = event.target.closest('.entry');
+  if (!entry) return;
+
+  const removeBtn = event.target.closest('[data-tags-remove]');
+  if (removeBtn) {
+    panel._tags.splice(Number(removeBtn.dataset.tagsRemove), 1);
+    renderTagsPanel(panel);
+    return;
+  }
+  const pickBtn = event.target.closest('[data-tags-pick]');
+  if (pickBtn) {
+    addTagToPanel(panel, pickBtn.dataset.tagsPick);
+    return;
+  }
+  const addBtn = event.target.closest('[data-tags-add]');
+  if (addBtn) {
+    const input = panel.querySelector('.tags-edit-input');
+    if (input) {
+      addTagToPanel(panel, input.value);
+      input.value = '';
+    }
+    return;
+  }
+  if (event.target.closest('[data-tags-cancel]')) {
+    closeTagsPanel(entry);
+    return;
+  }
+  const saveBtn = event.target.closest('[data-tags-save]');
+  if (!saveBtn) return;
+  const id = entry.dataset.id;
+  const token = adminToken();
+  if (!id || !token) return;
+  saveBtn.disabled = true;
+  saveBtn.removeAttribute('data-save-state');
+  saveBtn.textContent = '保存中…';
+  let ok = false;
+  let stored = null;
+  try {
+    const resp = await postJson('/api/tags', { id, tags: panel._tags, token });
+    const data = await resp.json();
+    if (resp.ok && data.ok && Array.isArray(data.tags)) {
+      // Verify against KV via a direct record read, same as note/retention.
+      const verified = await pollEntry(id, token, (e) => Array.isArray(e.tags)
+        && e.tags.length === data.tags.length
+        && e.tags.every((t, i) => t === data.tags[i]));
+      if (verified) {
+        ok = true;
+        stored = verified.tags;
+      }
+    } else {
+      adminMsg.textContent = (data && data.error) || '保存标签失败';
+    }
+  } catch (e) {
+    ok = false;
+  }
+  saveBtn.textContent = ok ? '成功' : '失败';
+  saveBtn.dataset.saveState = ok ? 'ok' : 'fail';
+  if (ok) {
+    const item = adminItems.get(id);
+    if (item) item.tags = stored;
+    adminMsg.textContent = `条目 ${id} 的标签已保存并在 KV 中确认。`;
+  } else if (!adminMsg.textContent || adminMsg.textContent.startsWith('共 ')) {
+    adminMsg.textContent = `条目 ${id} 的标签未能确认保存，请重试。`;
+  }
+  setTimeout(() => {
+    saveBtn.textContent = '保存标签';
+    saveBtn.disabled = false;
+    saveBtn.removeAttribute('data-save-state');
+    if (ok) {
+      closeTagsPanel(entry);
+      renderAdminList();
+      updateAdminCount();
+    }
   }, 1500);
 });
 

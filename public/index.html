@@ -114,6 +114,17 @@ https://example.com/ips.txt"
           </div>
 
           <div>
+            <label for="tagInput">条目标签（可选，可多选）</label>
+            <div id="genTagChips" class="tag-chips"></div>
+            <input id="tagInput" name="tagInput" type="text" placeholder="输入新标签，按回车添加" autocomplete="off" />
+            <div id="genTagSuggestions" class="tag-suggestions"></div>
+            <p class="hint">
+              给这条订阅打标签（如「香港」「主力」），方便在下方管理区按标签筛选：点下方已有标签选用，或输入新标签回车新建，每条最多 10 个。
+              重新生成已有条目时，没动过这里就不会改动它的标签；选了标签（哪怕清空）则按这里的为准。
+            </p>
+          </div>
+
+          <div>
             <label>存储期限</label>
             <div class="grid two-col compact">
               <select id="storageMode" name="storageMode">
@@ -356,11 +367,21 @@ https://example.com/ips.txt"
             <option value="remaining-desc">剩余有效期倒序（晚到期在前）</option>
           </select>
           <label for="adminSearch">搜索</label>
-          <input id="adminSearch" type="search" placeholder="按备注或来源 VPS / 节点搜索" autocomplete="off" />
+          <input id="adminSearch" type="search" placeholder="按备注、标签或来源 VPS / 节点搜索" autocomplete="off" />
           <span class="toolbar-spacer"></span>
           <button id="expandAllBtn" type="button" class="secondary small">展开全部</button>
           <button id="collapseAllBtn" type="button" class="secondary small">收起全部</button>
           <button id="deleteSelectedBtn" type="button" class="secondary small" disabled>删除所选</button>
+        </div>
+
+        <div id="tagFilterBar" class="tag-filter-bar hidden">
+          <span class="tag-filter-label">标签筛选</span>
+          <span id="tagFilterChips" class="tag-chips"></span>
+          <span class="tag-mode-toggle" role="group" aria-label="多标签筛选模式">
+            <button id="tagModeAnd" type="button" class="tag-mode-btn is-active">包含全部</button>
+            <button id="tagModeOr" type="button" class="tag-mode-btn">包含任一</button>
+          </span>
+          <button id="tagFilterClear" type="button" class="secondary small hidden">清除</button>
         </div>
 
         <div class="admin-wrap">

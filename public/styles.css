@@ -1079,6 +1079,123 @@ label {
 .entry-retention {
   padding: 2px 14px 18px;
 }
+
+/* Entry tags: chips in the picker, the rows, the filter bar and the
+   inline editor all share one pill look. */
+.tag-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(96, 165, 250, 0.08);
+  color: var(--text);
+  font-size: 0.85rem;
+  line-height: 1.5;
+  min-height: 32px;
+}
+button.tag-chip {
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.85rem;
+}
+button.tag-chip:hover {
+  border-color: var(--accent);
+}
+.tag-chip.is-on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #0b1220;
+  font-weight: 600;
+}
+.tag-chip-x {
+  border: none;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 2px 4px;
+  min-height: 24px;
+  min-width: 24px;
+}
+.tag-chip-x:hover {
+  color: var(--danger);
+}
+.tag-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+#genTagChips {
+  margin-bottom: 8px;
+}
+#genTagChips:empty {
+  margin-bottom: 0;
+}
+.entry-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.tag-chip-mini {
+  min-height: 28px;
+  padding: 2px 8px;
+  font-size: 0.8rem;
+}
+.tag-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0 14px;
+}
+.tag-filter-label {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.tag-mode-toggle {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.tag-mode-btn {
+  border: none;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 6px 12px;
+  min-height: 32px;
+}
+.tag-mode-btn.is-active {
+  background: var(--accent);
+  color: #0b1220;
+  font-weight: 600;
+}
+.entry-tags-panel {
+  padding: 2px 14px 18px;
+}
+.entry-tags-panel .tags-edit-chips {
+  margin-bottom: 12px;
+}
+.entry-tags-panel .tags-edit-input {
+  flex: 1 1 200px;
+}
+.entry-tags-panel .hint {
+  margin-top: 10px;
+}
 .ret-current {
   margin-bottom: 12px;
   font-size: 0.95rem;

@@ -755,6 +755,70 @@ console.log('worker tests passed');
   }
 }
 
+// --- Tags suite: record-carried labels, picker vocabulary, filtering data ---
+{
+  const recOf = (id) => JSON.parse(store.get(`sub:${id}`).value);
+  // Sanitization on generate: trim, whitespace collapse, per-tag cap,
+  // case-insensitive dedupe (first spelling wins).
+  const t1 = await generate({ nodeLinks: node, preferredIps: '104.16.7.7', tags: [' 香港 ', 'HK', 'hk', '主 力', 'x'.repeat(30)] });
+  assert.deepEqual(t1.tags, ['香港', 'HK', '主 力', 'x'.repeat(24)], 'tags sanitized on generate');
+  assert.deepEqual(recOf(t1.shortId).tags, t1.tags, 'tags stored on the record');
+
+  // Tags are NOT part of the dedup identity, and an absent field on a
+  // refresh leaves the stored tags untouched.
+  const t2 = await generate({ nodeLinks: node, preferredIps: '104.16.7.7' });
+  assert.equal(t2.shortId, t1.shortId, 'same content, no tags field: same entry');
+  assert.deepEqual(recOf(t1.shortId).tags, t1.tags, 'refresh without tags keeps them');
+  // A present field replaces wholesale — including an explicit empty set.
+  const t3 = await generate({ nodeLinks: node, preferredIps: '104.16.7.7', tags: ['备用'] });
+  assert.equal(t3.shortId, t1.shortId, 'same content with tags: still the same entry');
+  assert.deepEqual(recOf(t1.shortId).tags, ['备用'], 'present tags replace');
+  const t4 = await generate({ nodeLinks: node, preferredIps: '104.16.7.7', tags: [] });
+  assert.deepEqual(recOf(t1.shortId).tags, [], 'explicit empty array clears');
+
+  // Per-entry cap.
+  const many = await generate({ nodeLinks: node, preferredIps: '104.16.7.8', tags: Array.from({ length: 12 }, (_, i) => `t${i}`) });
+  assert.equal(many.tags.length, 10, 'at most 10 tags per entry');
+
+  // The admin list carries tags; untagged entries report [].
+  const plain = await generate({ nodeLinks: node, preferredIps: '104.16.7.9' });
+  assert.deepEqual(plain.tags, [], 'fresh entry without tags reports []');
+  const lr = await (await worker.fetch(adminReq('/api/list'), env)).json();
+  assert.deepEqual(lr.items.find((i) => i.id === many.shortId).tags, many.tags, 'list item carries tags');
+  assert.deepEqual(lr.items.find((i) => i.id === plain.shortId).tags, [], 'list item defaults to []');
+
+  // Vocabulary endpoint: counts across entries, auth required.
+  const vocab = await (await worker.fetch(adminReq('/api/tags'), env)).json();
+  assert.equal(vocab.ok, true);
+  assert.equal(vocab.tags.find((v) => v.tag === 't0').count, 1, 'vocabulary counts entries per tag');
+  assert.ok(!vocab.tags.some((v) => v.tag === '备用'), 'cleared tags leave the vocabulary');
+  const noAuth = await worker.fetch(new Request('https://x.pages.dev/api/tags'), env);
+  assert.equal(noAuth.status, 403, 'vocabulary requires the admin token');
+
+  // Save endpoint (management editor): sanitizes, persists, 404s and
+  // auth behave like the note endpoint.
+  const save = await worker.fetch(new Request('https://x.pages.dev/api/tags', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ token: 'tok', id: plain.shortId, tags: [' 直播 ', 'HK'] }),
+  }), env).then((r) => r.json());
+  assert.deepEqual(save.tags, ['直播', 'HK'], 'save returns the sanitized set');
+  assert.deepEqual(recOf(plain.shortId).tags, ['直播', 'HK'], 'save persisted on the record');
+  const entry = await (await worker.fetch(adminReq(`/api/entry?id=${plain.shortId}`), env)).json();
+  assert.deepEqual(entry.tags, ['直播', 'HK'], 'entry read carries tags for verification');
+  assert.deepEqual(entry.backfill.tags, ['直播', 'HK'], 'backfill carries tags');
+  const missing = await worker.fetch(new Request('https://x.pages.dev/api/tags', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ token: 'tok', id: 'NOPE000000', tags: [] }),
+  }), env);
+  assert.equal(missing.status, 404, 'save on a missing entry 404s');
+  const saveNoAuth = await worker.fetch(new Request('https://x.pages.dev/api/tags', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ id: plain.shortId, tags: [] }),
+  }), env);
+  assert.equal(saveNoAuth.status, 403, 'save requires the admin token');
+  console.log('tags suite: sanitize, refresh semantics, vocabulary, save endpoint, backfill: passed');
+}
+
 // --- Audit round 3 suite: hostile node links vs output formats, output cap ---
 {
   // Node links are semi-untrusted input (they get copied from public

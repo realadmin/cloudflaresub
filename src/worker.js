@@ -952,6 +952,34 @@ function sanitizeNote(value) {
     .slice(0, 80);
 }
 
+const MAX_TAGS_PER_ENTRY = 10;
+const MAX_TAG_LENGTH = 24;
+
+// Entry tags: free-form labels for grouping/filtering entries in the
+// admin list. Stored as an array on the record itself (like the note),
+// so they expire and delete with the entry and need no index keys.
+// Normalization: whitespace-collapsed, trimmed, capped per tag and per
+// entry, deduped case-insensitively (first spelling wins).
+function sanitizeTags(value) {
+  if (!Array.isArray(value)) return [];
+  const out = [];
+  const seen = new Set();
+  for (const raw of value) {
+    const tag = String(raw ?? '')
+      .replace(/[\r\n\t]+/g, ' ')
+      .trim()
+      .slice(0, MAX_TAG_LENGTH)
+      .trim();
+    if (!tag) continue;
+    const key = tag.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(tag);
+    if (out.length >= MAX_TAGS_PER_ENTRY) break;
+  }
+  return out;
+}
+
 function notePointerKey(note, id) {
   return `note:${note}:${id}`;
 }
@@ -1186,6 +1214,14 @@ async function handleGenerate(request, env, url) {
   const providedNote = typeof body.note === 'string' && body.note.trim() !== ''
     ? sanitizeNote(body.note)
     : null;
+  // Tags are metadata too (also NOT in the dedup hash). They follow an
+  // explicit-field rule, stricter than the note's: the field must be
+  // present to change anything. Absent = a fresh entry starts tagless
+  // and a refresh keeps the entry's tags; present (even an empty
+  // array) = replace wholesale. The generate form only sends the field
+  // when the owner actually touched the tag picker, so an incidental
+  // regeneration can never wipe an entry's tags.
+  const providedTags = Array.isArray(body.tags) ? sanitizeTags(body.tags) : null;
   // Raw form inputs, kept so this entry can later be backfilled into the
   // generate form for editing (exact restore). Entries created before this
   // field existed are reconstructed from their stored nodes instead.
@@ -1231,6 +1267,7 @@ async function handleGenerate(request, env, url) {
       version: 2,
       createdAt: new Date().toISOString(),
       note: providedNote || '',
+      tags: providedTags || [],
       storage: retention.storage,
       dedupHash,
       sources,
@@ -1251,6 +1288,7 @@ async function handleGenerate(request, env, url) {
       record = JSON.parse(raw);
       const prevNote = record.note || '';
       if (providedNote !== null) record.note = providedNote;
+      if (providedTags !== null) record.tags = providedTags;
       if (!record.sources) record.sources = sources;
       if (!record.dedupHash) record.dedupHash = dedupHash;
       // Same content => the inputs are the same too; backfill them onto
@@ -1277,6 +1315,7 @@ async function handleGenerate(request, env, url) {
         version: 2,
         createdAt: new Date().toISOString(),
         note: providedNote || '',
+        tags: providedTags || [],
         storage: retention.storage,
         dedupHash,
         sources,
@@ -1313,6 +1352,7 @@ async function handleGenerate(request, env, url) {
       surge: withToken('surge'),
     },
     note: record.note || '',
+    tags: Array.isArray(record.tags) ? record.tags : [],
     storage: record.storage || { mode: 'permanent' },
     links: nodes.map(encodeNodeLink).filter(Boolean),
     plainText: renderPlain(nodes),
@@ -1411,6 +1451,7 @@ async function handleList(request, env, url) {
       const item = {
         id,
         note: meta.note || '',
+        tags: [],
         createdAt: meta.createdAt || null,
         sources: meta.sources ? meta.sources.split(',').filter(Boolean) : [],
         outputNodes: typeof meta.out === 'number' ? meta.out : null,
@@ -1429,6 +1470,7 @@ async function handleList(request, env, url) {
         try {
           const rec = JSON.parse(raw);
           item.note = rec.note || '';
+          item.tags = Array.isArray(rec.tags) ? rec.tags : [];
           item.createdAt = rec.createdAt || item.createdAt;
           const servers = [...new Set((rec.sources || []).map((x) => x.server).filter(Boolean))];
           if (servers.length) item.sources = servers;
@@ -1522,6 +1564,7 @@ function buildBackfill(record) {
     namePrefix: record.options?.namePrefix || '',
     keepOriginalHost: record.options?.keepOriginalHost !== false,
     note: record.note || '',
+    tags: Array.isArray(record.tags) ? [...record.tags] : [],
     storage: record.storage || { mode: 'permanent' },
   };
   if (record.inputs && typeof record.inputs.nodeLinks === 'string' && record.inputs.nodeLinks) {
@@ -1571,6 +1614,7 @@ async function handleEntry(request, env, url) {
     ok: true,
     id,
     note: record.note || '',
+    tags: Array.isArray(record.tags) ? record.tags : [],
     createdAt: record.createdAt || null,
     storage: record.storage || { mode: 'permanent' },
     linkToken: await linkTokenFor(id, env),
@@ -1661,6 +1705,55 @@ async function handleNote(request, env) {
   // the old 7-day code, no storage plan) have no plan and become permanent.
   await putRecord(env, id, record, prevNote, remainingTtl(record));
   return json({ ok: true, id, note: record.note });
+}
+
+// Save one entry's tag set (management-area tag editor). Mirrors the
+// note save: the record is rewritten with its remaining TTL, and the
+// stored (sanitized) tags are returned for the UI's read-back check.
+async function handleTagsSave(request, env) {
+  const { body, error } = await parseAdminBody(request, env);
+  if (error) return error;
+
+  const id = String(body.id || '').trim();
+  if (!id) return json({ ok: false, error: '缺少条目 id' }, 400);
+  const raw = await env.SUB_STORE.get(`sub:${id}`);
+  if (!raw) return json({ ok: false, error: '条目不存在' }, 404);
+
+  const record = JSON.parse(raw);
+  record.tags = sanitizeTags(body.tags);
+  record.updatedAt = new Date().toISOString();
+  await putRecord(env, id, record, record.note || '', remainingTtl(record));
+  return json({ ok: true, id, tags: record.tags });
+}
+
+// The site's tag vocabulary with per-tag entry counts, aggregated live
+// from the records (the generate form's tag picker offers these). Like
+// the admin list, it enumerates keys but reads every field from the
+// records themselves; ghost keys and corrupt records are skipped.
+async function handleTagsList(request, env, url) {
+  if (!env.SUB_STORE) return json({ ok: false, error: 'SUB_STORE KV 未绑定' }, 500);
+  const denied = await checkAdmin(request, env, url, null);
+  if (denied) return denied;
+
+  const counts = new Map();
+  let cursor;
+  do {
+    const page = await env.SUB_STORE.list({ prefix: 'sub:', cursor, limit: 256 });
+    for (const key of page.keys) {
+      const raw = await env.SUB_STORE.get(key.name);
+      if (raw === null || raw === undefined) continue;
+      let rec;
+      try { rec = JSON.parse(raw); } catch { continue; }
+      if (!Array.isArray(rec.tags)) continue;
+      for (const tag of rec.tags) counts.set(tag, (counts.get(tag) || 0) + 1);
+    }
+    cursor = page.list_complete ? undefined : page.cursor;
+  } while (cursor);
+
+  const tags = [...counts.entries()]
+    .map(([tag, count]) => ({ tag, count }))
+    .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag, 'zh-Hans-CN'));
+  return json({ ok: true, tags });
 }
 
 async function handleRetention(request, env) {
@@ -1832,6 +1925,14 @@ export default {
 
       if (request.method === 'POST' && url.pathname === '/api/note') {
         return await handleNote(request, env);
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/tags') {
+        return await handleTagsList(request, env, url);
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/tags') {
+        return await handleTagsSave(request, env);
       }
 
       if (request.method === 'POST' && url.pathname === '/api/retention') {
