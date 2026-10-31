@@ -152,6 +152,9 @@ async function loadGenTagVocab() {
 
 if (genTagInput) {
   genTagInput.addEventListener('keydown', (event) => {
+    // Enter during IME composition confirms a candidate; it must not
+    // also commit the half-typed text as a tag.
+    if (event.isComposing) return;
     if (event.key === 'Enter' || event.key === ',') {
       event.preventDefault();
       addGenTag(genTagInput.value);
@@ -217,6 +220,7 @@ form.addEventListener('submit', async (event) => {
     if (!response.ok || !data.ok) {
       throw new Error(data.error || '生成失败');
     }
+    genTagVocab = null; // this generate may have introduced new tags
 
     autoUrl.value = data.urls.auto;
     rawUrl.value = data.urls.raw;
@@ -489,19 +493,34 @@ const tagModeAndBtn = byId('tagModeAnd');
 const tagModeOrBtn = byId('tagModeOr');
 
 function allTagCounts() {
-  const counts = new Map();
+  // Case variants of one tag ('HK' vs 'hk') are a single tag for
+  // filtering, matching the server vocabulary: aggregate by lowercase,
+  // show the first spelling seen, count entries (never occurrences).
+  const byLower = new Map();
   for (const item of adminState.items) {
-    for (const t of item.tags || []) counts.set(t, (counts.get(t) || 0) + 1);
+    const seen = new Set();
+    for (const t of item.tags || []) {
+      const lower = String(t).toLowerCase();
+      if (seen.has(lower)) continue;
+      seen.add(lower);
+      const cur = byLower.get(lower);
+      if (cur) cur.count += 1;
+      else byLower.set(lower, { tag: t, count: 1 });
+    }
   }
-  return [...counts.entries()]
-    .map(([tag, count]) => ({ tag, count }))
+  return [...byLower.values()]
     .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag, 'zh-Hans-CN'));
+}
+
+function selectedTagLowers() {
+  return new Set([...adminState.tagSelected].map((t) => t.toLowerCase()));
 }
 
 function entryTagsHtml(item) {
   const tags = item.tags || [];
   if (!tags.length) return '';
-  return `<div class="entry-tags">${tags.map((t) => `<button type="button" class="tag-chip tag-chip-mini${adminState.tagSelected.has(t) ? ' is-on' : ''}" data-tag-filter="${escapeHtml(t)}" title="按此标签筛选">${escapeHtml(t)}</button>`).join('')}</div>`;
+  const sel = selectedTagLowers();
+  return `<div class="entry-tags">${tags.map((t) => `<button type="button" class="tag-chip tag-chip-mini${sel.has(String(t).toLowerCase()) ? ' is-on' : ''}" data-tag-filter="${escapeHtml(t)}" title="按此标签筛选">${escapeHtml(t)}</button>`).join('')}</div>`;
 }
 
 function renderTagFilterBar() {
@@ -513,8 +532,9 @@ function renderTagFilterBar() {
   }
   tagFilterBar.classList.toggle('hidden', vocab.length === 0);
   if (!vocab.length) return;
+  const sel = selectedTagLowers();
   tagFilterChips.innerHTML = vocab
-    .map((v) => `<button type="button" class="tag-chip tag-chip-filter${adminState.tagSelected.has(v.tag) ? ' is-on' : ''}" data-tag-filter="${escapeHtml(v.tag)}">${escapeHtml(v.tag)} · ${v.count}</button>`)
+    .map((v) => `<button type="button" class="tag-chip tag-chip-filter${sel.has(String(v.tag).toLowerCase()) ? ' is-on' : ''}" data-tag-filter="${escapeHtml(v.tag)}">${escapeHtml(v.tag)} · ${v.count}</button>`)
     .join('');
   if (tagFilterClear) tagFilterClear.classList.toggle('hidden', adminState.tagSelected.size === 0);
   if (tagModeAndBtn) tagModeAndBtn.classList.toggle('is-active', adminState.tagMode === 'and');
@@ -522,7 +542,11 @@ function renderTagFilterBar() {
 }
 
 function toggleTagFilter(tag) {
-  if (adminState.tagSelected.has(tag)) adminState.tagSelected.delete(tag);
+  // One selection per tag, case-insensitively: toggling any spelling of
+  // an already-selected tag deselects it.
+  const lower = String(tag).toLowerCase();
+  const existing = [...adminState.tagSelected].find((t) => t.toLowerCase() === lower);
+  if (existing) adminState.tagSelected.delete(existing);
   else adminState.tagSelected.add(tag);
   adminState.selected.clear();
   renderAdminList();
@@ -1145,6 +1169,7 @@ function addTagToPanel(panel, raw) {
 }
 
 document.addEventListener('keydown', (event) => {
+  if (event.isComposing) return; // IME candidate confirmation, not "add"
   const input = event.target.closest?.('.tags-edit-input');
   if (!input || event.key !== 'Enter') return;
   event.preventDefault();
@@ -1218,6 +1243,7 @@ document.addEventListener('click', async (event) => {
   if (ok) {
     const item = adminItems.get(id);
     if (item) item.tags = stored;
+    genTagVocab = null; // the generate picker must offer the new tags too
     adminMsg.textContent = `条目 ${id} 的标签已保存并在 KV 中确认。`;
   } else if (!adminMsg.textContent || adminMsg.textContent.startsWith('共 ')) {
     adminMsg.textContent = `条目 ${id} 的标签未能确认保存，请重试。`;

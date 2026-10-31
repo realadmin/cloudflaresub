@@ -816,6 +816,31 @@ console.log('worker tests passed');
     body: JSON.stringify({ id: plain.shortId, tags: [] }),
   }), env);
   assert.equal(saveNoAuth.status, 403, 'save requires the admin token');
+
+  // Audit fixes (2026-10-31): F1 a missing/non-array tags field must be
+  // a 400, never a silent wipe; F3 non-string members are dropped, not
+  // String()-coerced into junk tags; F7 the per-tag length cap never
+  // splits a surrogate pair; F5+F6 the vocabulary merges case variants
+  // and counts entries, not occurrences.
+  const postTagsRaw = (body) => worker.fetch(new Request('https://x.pages.dev/api/tags', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: 'tok', ...body }),
+  }), env);
+  assert.equal((await postTagsRaw({ id: plain.shortId })).status, 400, 'F1: missing tags field 400s');
+  assert.equal((await postTagsRaw({ id: plain.shortId, tags: 'HK' })).status, 400, 'F1: string tags 400s');
+  assert.deepEqual(recOf(plain.shortId).tags, ['直播', 'HK'], 'F1: rejected saves leave tags untouched');
+  const f3 = await generate({ nodeLinks: node, preferredIps: '104.16.7.10', tags: [{}, [], 7, '正'] });
+  assert.deepEqual(f3.tags, ['正'], 'F3: non-string members dropped');
+  const f7 = await generate({ nodeLinks: node, preferredIps: '104.16.7.11', tags: ['a' + '🔥'.repeat(12)] });
+  assert.equal(f7.tags[0].length, 23, 'F7: cap drops the dangling surrogate half');
+  assert.ok(!/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(f7.tags[0]), 'F7: no lone surrogate stored');
+  store.set('sub:CASEAAA', { value: JSON.stringify({ version: 2, tags: ['HK', 'hk', 'HK'] }), metadata: undefined, expirationTtl: undefined });
+  store.set('sub:CASEBBB', { value: JSON.stringify({ version: 2, tags: ['hk'] }), metadata: undefined, expirationTtl: undefined });
+  const vocab2 = await (await worker.fetch(adminReq('/api/tags'), env)).json();
+  const hkEntry = vocab2.tags.filter((v) => v.tag.toLowerCase() === 'hk');
+  assert.equal(hkEntry.length, 1, 'F5: case variants merge into one vocabulary entry');
+  assert.equal(hkEntry[0].count, 3, 'F5+F6: count is entries (plain + CASEAAA + CASEBBB), duplicates inside one record ignored');
+  store.delete('sub:CASEAAA');
+  store.delete('sub:CASEBBB');
   console.log('tags suite: sanitize, refresh semantics, vocabulary, save endpoint, backfill: passed');
 }
 

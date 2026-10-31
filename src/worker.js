@@ -944,12 +944,21 @@ function staticDedupText(text) {
   return hasIdentityLine ? `${text}\nstatic:` : text;
 }
 
+// A length cap applied by code units can split an emoji's surrogate
+// pair; drop a dangling half so stored text never renders as �.
+function dropDanglingSurrogate(s) {
+  const c = s.charCodeAt(s.length - 1);
+  return c >= 0xd800 && c <= 0xdbff ? s.slice(0, -1) : s;
+}
+
 function sanitizeNote(value) {
   // Owner-written remark identifying an entry (e.g. which VPS it belongs to).
-  return String(value ?? '')
-    .replace(/[\r\n\t]+/g, ' ')
-    .trim()
-    .slice(0, 80);
+  return dropDanglingSurrogate(
+    String(value ?? '')
+      .replace(/[\r\n\t]+/g, ' ')
+      .trim()
+      .slice(0, 80),
+  );
 }
 
 const MAX_TAGS_PER_ENTRY = 10;
@@ -959,17 +968,18 @@ const MAX_TAG_LENGTH = 24;
 // admin list. Stored as an array on the record itself (like the note),
 // so they expire and delete with the entry and need no index keys.
 // Normalization: whitespace-collapsed, trimmed, capped per tag and per
-// entry, deduped case-insensitively (first spelling wins).
+// entry, deduped case-insensitively (first spelling wins). Only string
+// members are tags at all — coercing anything else would mint junk
+// labels like "[object Object]".
 function sanitizeTags(value) {
   if (!Array.isArray(value)) return [];
   const out = [];
   const seen = new Set();
   for (const raw of value) {
-    const tag = String(raw ?? '')
-      .replace(/[\r\n\t]+/g, ' ')
-      .trim()
-      .slice(0, MAX_TAG_LENGTH)
-      .trim();
+    if (typeof raw !== 'string') continue;
+    const tag = dropDanglingSurrogate(
+      raw.replace(/[\r\n\t]+/g, ' ').trim().slice(0, MAX_TAG_LENGTH),
+    ).trim();
     if (!tag) continue;
     const key = tag.toLowerCase();
     if (seen.has(key)) continue;
@@ -1716,6 +1726,10 @@ async function handleTagsSave(request, env) {
 
   const id = String(body.id || '').trim();
   if (!id) return json({ ok: false, error: '缺少条目 id' }, 400);
+  // The tag set must arrive as an array: a missing or malformed field
+  // must never silently wipe an entry's tags (the generate endpoint's
+  // explicit-field rule exists for exactly this reason).
+  if (!Array.isArray(body.tags)) return json({ ok: false, error: 'tags 必须是数组' }, 400);
   const raw = await env.SUB_STORE.get(`sub:${id}`);
   if (!raw) return json({ ok: false, error: '条目不存在' }, 404);
 
@@ -1735,7 +1749,11 @@ async function handleTagsList(request, env, url) {
   const denied = await checkAdmin(request, env, url, null);
   if (denied) return denied;
 
-  const counts = new Map();
+  // Aggregate case-insensitively (filtering matches case-insensitively,
+  // so 'HK' and 'hk' are one tag with one count), display the first
+  // spelling seen, and count ENTRIES, never occurrences — a record
+  // hand-edited in KV could otherwise inflate a count with duplicates.
+  const byLower = new Map();
   let cursor;
   do {
     const page = await env.SUB_STORE.list({ prefix: 'sub:', cursor, limit: 256 });
@@ -1745,13 +1763,20 @@ async function handleTagsList(request, env, url) {
       let rec;
       try { rec = JSON.parse(raw); } catch { continue; }
       if (!Array.isArray(rec.tags)) continue;
-      for (const tag of rec.tags) counts.set(tag, (counts.get(tag) || 0) + 1);
+      const seen = new Set();
+      for (const tag of rec.tags) {
+        const lower = String(tag).toLowerCase();
+        if (seen.has(lower)) continue;
+        seen.add(lower);
+        const cur = byLower.get(lower);
+        if (cur) cur.count += 1;
+        else byLower.set(lower, { tag, count: 1 });
+      }
     }
     cursor = page.list_complete ? undefined : page.cursor;
   } while (cursor);
 
-  const tags = [...counts.entries()]
-    .map(([tag, count]) => ({ tag, count }))
+  const tags = [...byLower.values()]
     .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag, 'zh-Hans-CN'));
   return json({ ok: true, tags });
 }
