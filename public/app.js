@@ -332,6 +332,83 @@ function makeChipsSortable(container, chipSelector, { onReorder, trashEl = null,
   });
 }
 
+// ---------------- Node-name format picker ----------------
+// Four name components the owner can reorder (long-press drag, the
+// same helper the tag chips use) and show/hide (the eye button).
+// The visible keys, in order, ride the generate request as
+// nameFormat; the server stores them on the entry and re-applies
+// them on every (re)build, so a dynamic entry's names track its
+// preferred endpoints as they refresh.
+const NAME_FORMAT_LABELS = { name: '原始名称', prefix: '批量备注', endpoint: '优选地址', remark: '端点备注' };
+const NAME_FORMAT_DEFAULT = [
+  { key: 'name', on: true },
+  { key: 'prefix', on: true },
+  { key: 'endpoint', on: true },
+  { key: 'remark', on: true },
+];
+let nameFormatState = NAME_FORMAT_DEFAULT.map((c) => ({ ...c }));
+const nameFormatChips = byId('nameFormatChips');
+const nameFormatExample = byId('nameFormatExample');
+
+function nameFormatValue() {
+  return nameFormatState.filter((c) => c.on).map((c) => c.key);
+}
+function renderNameFormatExample() {
+  if (!nameFormatExample) return;
+  const samples = {
+    name: '香港 01',
+    prefix: (byId('namePrefix')?.value || '').trim() || 'CF',
+    endpoint: '104.16.1.1',
+    remark: 'HK',
+  };
+  const parts = nameFormatValue().map((k) => samples[k]).filter(Boolean);
+  nameFormatExample.textContent = parts.length
+    ? `示例节点名：${parts.join(' | ')}`
+    : '示例节点名：（至少保留一段可见）';
+}
+function renderNameFormatChips() {
+  if (!nameFormatChips) return;
+  nameFormatChips.innerHTML = nameFormatState.map((c) => `
+    <span class="tag-chip nf-chip${c.on ? '' : ' is-off'}" data-sort-value="${c.key}"><span class="nf-label">${NAME_FORMAT_LABELS[c.key]}</span><button type="button" class="nf-eye" data-nf-toggle="${c.key}" aria-label="${c.on ? '隐藏' : '显示'}${NAME_FORMAT_LABELS[c.key]}">👁</button></span>`).join('');
+  renderNameFormatExample();
+}
+function setNameFormat(format) {
+  // A missing or empty format (a legacy record, an older server)
+  // means the legacy arrangement: endpoint component off.
+  const valid = Array.isArray(format) ? format.filter((k) => k in NAME_FORMAT_LABELS) : [];
+  const keys = valid.length ? valid : ['name', 'prefix', 'remark'];
+  const seen = new Set();
+  const state = [];
+  for (const k of keys) {
+    if (!seen.has(k)) { seen.add(k); state.push({ key: k, on: true }); }
+  }
+  for (const k of Object.keys(NAME_FORMAT_LABELS)) {
+    if (!seen.has(k)) state.push({ key: k, on: false });
+  }
+  nameFormatState = state.length ? state : NAME_FORMAT_DEFAULT.map((c) => ({ ...c }));
+  renderNameFormatChips();
+}
+if (nameFormatChips) {
+  nameFormatChips.addEventListener('click', (event) => {
+    const btn = event.target.closest('[data-nf-toggle]');
+    if (!btn) return;
+    const item = nameFormatState.find((c) => c.key === btn.dataset.nfToggle);
+    if (!item) return;
+    if (item.on && nameFormatValue().length <= 1) return; // one component must stay visible
+    item.on = !item.on;
+    renderNameFormatChips();
+  });
+  makeChipsSortable(nameFormatChips, '.nf-chip', {
+    onReorder: (values) => {
+      const byKey = new Map(nameFormatState.map((c) => [c.key, c]));
+      nameFormatState = values.map((k) => byKey.get(k)).filter(Boolean);
+      renderNameFormatChips();
+    },
+  });
+  renderNameFormatChips();
+  byId('namePrefix')?.addEventListener('input', renderNameFormatExample);
+}
+
 // ---------------- Generate-form tag picker ----------------
 // Selected tags ride along with the generate request ONLY when the
 // owner actually touched the picker (added/removed a chip, or a
@@ -486,6 +563,7 @@ fillDemoBtn.addEventListener('click', () => {
   byId('nodeLinks').value = demoVmess;
   byId('preferredIps').value = demoIps;
   byId('namePrefix').value = 'CF';
+  setNameFormat(['name', 'prefix', 'endpoint', 'remark']);
   byId('keepOriginalHost').checked = true;
 });
 
@@ -499,6 +577,7 @@ form.addEventListener('submit', async (event) => {
     preferredIps: byId('preferredIps').value,
     sourceLimit: Number(ipSourceLimitInput?.value || 10),
     namePrefix: byId('namePrefix').value,
+    nameFormat: nameFormatValue(),
     keepOriginalHost: byId('keepOriginalHost').checked,
     // Generating writes to KV, so it carries the same admin token the
     // owner keeps in the admin section's token box below.
@@ -1885,6 +1964,7 @@ function fillGenerateForm(bf) {
   else setValue('preferredIps', bf.preferredIps);
   if (bf.sourceLimit) setValue('ipSourceLimit', bf.sourceLimit);
   setValue('namePrefix', bf.namePrefix);
+  setNameFormat(bf.nameFormat);
   const keep = byId('keepOriginalHost');
   if (keep) keep.checked = bf.keepOriginalHost !== false;
   setValue('subNote', bf.note);

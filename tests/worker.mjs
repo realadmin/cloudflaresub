@@ -2311,3 +2311,97 @@ console.log('worker tests passed');
 
   console.log('audit round 18 suite: xhttp opts, profile-title, semver tag filter, manual redirects: passed');
 }
+
+// --- Name format + source remark adoption suite ---
+{
+  const ADMIN = 'tok-0123456789abcdef';
+  const NODE = 'vless://f541611e-0aeb-4900-aa47-6e95d4916a49@n.example.com:443?security=tls&type=ws&path=%2Fws&host=n.example.com#NF 01';
+  const names = (plain) => plain.split('\n').filter(Boolean).map((l) => decodeURIComponent(l.split('#')[1] || ''));
+
+  // Component order + visibility: endpoint first, prefix/remark hidden.
+  {
+    const g = await generate({ nodeLinks: NODE, preferredIps: '104.16.1.1#香港\n104.16.1.2:8443', namePrefix: '自用', nameFormat: ['endpoint', 'name'] });
+    const sub = await getSub(g.shortId, 'plain');
+    assert.deepEqual(names(sub.body), ['104.16.1.1 | NF 01', '104.16.1.2:8443 | NF 01'], 'nameFormat orders endpoint before name');
+  }
+  // Endpoint only; IPv6 is bracketed and carries its port.
+  {
+    const g = await generate({ nodeLinks: NODE, preferredIps: '[2001:db8::1]:8443', nameFormat: ['endpoint'] });
+    const sub = await getSub(g.shortId, 'plain');
+    assert.deepEqual(names(sub.body), ['[2001:db8::1]:8443'], 'endpoint-only name brackets IPv6');
+  }
+  // Remark slot falls back to the global counter; junk keys sanitize away.
+  {
+    const g = await generate({ nodeLinks: NODE, preferredIps: '104.16.3.1#HK\n104.16.3.2', nameFormat: ['remark', 'endpoint', 'bogus', 'remark'] });
+    const sub = await getSub(g.shortId, 'plain');
+    assert.deepEqual(names(sub.body), ['HK | 104.16.3.1', '2 | 104.16.3.2'], 'remark slot + counter fallback + sanitize');
+  }
+  // Dedup identity: an explicit legacy format equals no format (hit);
+  // a different format is a different product (new entry). Backfill
+  // always reports a concrete arrangement.
+  {
+    const body = { nodeLinks: NODE, preferredIps: '104.16.4.1', namePrefix: '自用' };
+    const g1 = await generate(body);
+    const g2 = await generate({ ...body, nameFormat: ['name', 'prefix', 'remark'] });
+    assert.equal(g2.shortId, g1.shortId, 'explicit legacy format hits the format-less entry');
+    assert.equal(g2.deduplicated, true, 'legacy-format regeneration is a hit');
+    const g3 = await generate({ ...body, nameFormat: ['endpoint', 'name'] });
+    assert.notEqual(g3.shortId, g1.shortId, 'different format mints a new entry');
+    const er3 = await worker.fetch(adminReq(`/api/entry?id=${g3.shortId}`), env).then((r) => r.json());
+    assert.deepEqual(er3.backfill.nameFormat, ['endpoint', 'name'], 'backfill carries the stored format');
+    const er1 = await worker.fetch(adminReq(`/api/entry?id=${g1.shortId}`), env).then((r) => r.json());
+    assert.deepEqual(er1.backfill.nameFormat, ['name', 'prefix', 'remark'], 'legacy entry backfills the legacy arrangement');
+  }
+  // Dynamic: source '#' remarks are adopted, and a refresh renames the
+  // nodes (new address AND new remark) under the stored format. Remark
+  // text itself never spawns endpoints.
+  {
+    const store = new Map();
+    const e = {
+      SUB_ACCESS_TOKEN: ADMIN,
+      SUB_STORE: {
+        async get(k) { return store.get(k)?.value ?? null; },
+        async put(k, v, o = {}) { store.set(k, { value: v, metadata: o.metadata }); },
+        async delete(k) { store.delete(k); },
+        async list({ prefix = '', limit = 1000 } = {}) {
+          const keys = [...store.entries()].filter(([n]) => n.startsWith(prefix)).slice(0, limit).map(([name, en]) => ({ name, metadata: en.metadata }));
+          return { keys, list_complete: true, cursor: '' };
+        },
+      },
+      ASSETS: { async fetch() { return new Response('HOME'); } },
+    };
+    let body = '104.16.2.1#香港\n104.16.2.2#HK 02';
+    const savedFetch = globalThis.fetch;
+    globalThis.fetch = async (url) => {
+      if (String(url) === 'https://nf.example.com/l.txt') return new Response(body, { status: 200 });
+      return savedFetch(url);
+    };
+    try {
+      const g = await worker.fetch(new Request('https://x.pages.dev/api/generate', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ token: ADMIN, nodeLinks: NODE, preferredIps: 'https://nf.example.com/l.txt', namePrefix: '自用', nameFormat: ['name', 'endpoint', 'remark'] }),
+      }), e).then((r) => r.json());
+      assert.ok(g.ok, 'dynamic generate ok');
+      const tok = new URL(g.urls.auto).searchParams.get('token');
+      const pull = () => worker.fetch(new Request(`https://x.pages.dev/sub/${g.shortId}?target=plain&token=${tok}`), e).then((r) => r.text());
+      assert.deepEqual(names(await pull()), ['NF 01 | 104.16.2.1 | 香港', 'NF 01 | 104.16.2.2 | HK 02'], 'source remarks adopted into names');
+      const age = () => {
+        for (const [k, v] of store) {
+          if (k.startsWith('ipcache:')) { const c = JSON.parse(v.value); c.fetchedAt -= 2 * 3600e3; c.lastAttempt -= 2 * 3600e3; v.value = JSON.stringify(c); }
+          if (k === `entrycache:${g.shortId}`) { const c = JSON.parse(v.value); c.at -= 11 * 60e3; v.value = JSON.stringify(c); }
+        }
+      };
+      body = '104.16.8.8#新加坡';
+      age();
+      assert.deepEqual(names(await pull()), ['NF 01 | 104.16.8.8 | 新加坡'], 'refresh renames nodes with the new endpoint + remark');
+      body = '104.16.5.1#备用 1.1.1.1';
+      age();
+      const after = names(await pull());
+      assert.equal(after.length, 1, 'remark text spawns no endpoints');
+      assert.ok(after[0].includes('备用 1.1.1.1'), 'the whole remark tail is kept');
+    } finally {
+      globalThis.fetch = savedFetch;
+    }
+  }
+  console.log('name format + source remarks suite: passed');
+}

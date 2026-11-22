@@ -250,26 +250,33 @@ function extractEndpointTokens(text) {
     // An endpoint is short; matching only a line's head bounds the regex
     // work a hostile or broken source can make us do per line.
     const line = lines[i].slice(0, 600);
+    // A '#' tail on the line is that line's remark (the same rule the
+    // hand-typed parser applies): it rides along on every endpoint the
+    // line yields, and the remark text itself is never scanned for
+    // endpoints.
+    const hashIdx = line.indexOf('#');
+    const remark = hashIdx >= 0 ? line.slice(hashIdx + 1).trim() : '';
+    const scanLine = hashIdx >= 0 ? line.slice(0, hashIdx) : line;
     // CSV tables whose header names a port column ("IP,port,colo")
     // carry the port in the second cell: when the first cell is an
     // endpoint without an explicit port and the second cell is a
     // bare port, that port belongs to the endpoint.
-    const cells = line.split(',');
+    const cells = scanLine.split(',');
     if (csvPortColumn && cells.length > 1) {
       const first = cells[0].trim();
       const second = (cells[1] || '').trim();
       if (first && /^\d{1,5}$/.test(second) && !/[:\]]$/.test(first) && !first.includes(':')) {
         const m = first.match(/^(\[[0-9a-fA-F:]+\]|\d{1,3}(?:\.\d{1,3}){3}|(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,})$/);
         if (m) {
-          tokens.push(`${first}:${second}`);
+          tokens.push({ token: `${first}:${second}`, remark });
           continue;
         }
       }
     }
-    for (const m of line.matchAll(re)) {
-      if (m[1]) tokens.push(m[2] ? `[${m[1]}]:${m[2]}` : m[1]);
-      else if (m[3]) tokens.push(m[4] ? `${m[3]}:${m[4]}` : m[3]);
-      else if (m[5]) tokens.push(m[6] ? `${m[5]}:${m[6]}` : m[5]);
+    for (const m of scanLine.matchAll(re)) {
+      if (m[1]) tokens.push({ token: m[2] ? `[${m[1]}]:${m[2]}` : m[1], remark });
+      else if (m[3]) tokens.push({ token: m[4] ? `${m[3]}:${m[4]}` : m[3], remark });
+      else if (m[5]) tokens.push({ token: m[6] ? `${m[5]}:${m[6]}` : m[5], remark });
       if (tokens.length >= 2000) break;
     }
   }
@@ -453,7 +460,9 @@ async function fetchIpSource(rawUrl) {
   const candidates = jsonStrings
     ? jsonStrings.flatMap((s) => extractEndpointTokens(s))
     : extractEndpointTokens(text);
-  const parsed = parsePreferredEndpoints(candidates.join('\n'));
+  const parsed = parsePreferredEndpoints(
+    candidates.map((c) => (c.remark ? `${c.token}#${c.remark}` : c.token)).join('\n'),
+  );
   const seen = new Set();
   const endpoints = [];
   for (const ep of parsed) {
@@ -948,6 +957,32 @@ function dedupeNodeNames(nodes, reserved = []) {
   });
 }
 
+// Node-name assembly: the owner arranges four components (original
+// node name, batch prefix, preferred endpoint, endpoint remark) in
+// any order and hides any of them. Records without a stored format
+// render exactly as before this feature existed.
+const NAME_FORMAT_KEYS = ['name', 'prefix', 'endpoint', 'remark'];
+const LEGACY_NAME_FORMAT = ['name', 'prefix', 'remark'];
+function sanitizeNameFormat(value) {
+  if (!Array.isArray(value)) return null;
+  const seen = new Set();
+  const out = [];
+  for (const key of value) {
+    if (NAME_FORMAT_KEYS.includes(key) && !seen.has(key)) {
+      seen.add(key);
+      out.push(key);
+    }
+  }
+  return out.length ? out : null;
+}
+function effectiveNameFormat(options) {
+  return sanitizeNameFormat(options && options.nameFormat) || LEGACY_NAME_FORMAT;
+}
+function endpointNamePart(ep) {
+  const host = formatHostForUrl(ep.server);
+  return ep.port ? `${host}:${ep.port}` : host;
+}
+
 function buildNodes(baseNodes, preferredEndpoints, options = {}) {
   const output = [];
   const prefix = (options.namePrefix || '').trim();
@@ -956,10 +991,15 @@ function buildNodes(baseNodes, preferredEndpoints, options = {}) {
     for (const ep of preferredEndpoints) {
       counter += 1;
       const nameParts = [];
-      if (node.name) nameParts.push(node.name);
-      if (prefix) nameParts.push(prefix);
-      if (ep.remark) nameParts.push(ep.remark);
-      else nameParts.push(String(counter));
+      for (const part of effectiveNameFormat(options)) {
+        if (part === 'name' && node.name) nameParts.push(node.name);
+        else if (part === 'prefix' && prefix) nameParts.push(prefix);
+        else if (part === 'endpoint') nameParts.push(endpointNamePart(ep));
+        else if (part === 'remark') nameParts.push(ep.remark || String(counter));
+      }
+      // A format of only empty components (e.g. ['name'] on an
+      // unnamed node) must still yield a usable name.
+      if (!nameParts.length) nameParts.push(String(counter));
       output.push({
         ...node,
         // Names land in line-based config formats (Surge, Clash): a raw
@@ -1465,6 +1505,7 @@ async function buildDedupHash(body) {
     nodeLinks: normalizeLines(body.nodeLinks || ''),
     preferredIps: normalizeLines(body.preferredIps || ''),
     namePrefix: String(body.namePrefix || '').trim(),
+    nameFormat: (sanitizeNameFormat(body.nameFormat) || LEGACY_NAME_FORMAT).join(','),
     keepOriginalHost: body.keepOriginalHost !== false,
   };
   return sha256Hex(JSON.stringify(normalized));
@@ -1692,6 +1733,7 @@ async function handleGenerateBody(request, env, url) {
   // Cap the name prefix before it reaches the dedup hash and every node
   // name, so an oversized prefix cannot bloat records or outputs.
   body.namePrefix = String(body.namePrefix || '').trim().slice(0, 100);
+  body.nameFormat = sanitizeNameFormat(body.nameFormat);
 
   const parsed = parseRawLinks(body.nodeLinks || '');
   // Nodes whose own port is unusable (e.g. a hand-written vmess JSON
@@ -1820,6 +1862,7 @@ async function handleGenerateBody(request, env, url) {
   const options = {
     namePrefix: body.namePrefix || '',
     keepOriginalHost: body.keepOriginalHost !== false,
+    ...(body.nameFormat ? { nameFormat: body.nameFormat } : {}),
   };
 
   // The output is the full cartesian product; without a ceiling, a big
@@ -2309,6 +2352,7 @@ function snapshotLines(record) {
 function buildBackfill(record) {
   const base = {
     namePrefix: record.options?.namePrefix || '',
+    nameFormat: sanitizeNameFormat(record.options?.nameFormat) || [...LEGACY_NAME_FORMAT],
     keepOriginalHost: record.options?.keepOriginalHost !== false,
     note: (typeof record.note === 'string' ? record.note : ''),
     tags: sanitizeTags(record.tags),

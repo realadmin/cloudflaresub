@@ -1197,11 +1197,30 @@ button.tag-chip:hover {
   color: #0b1220;
   font-weight: 600;
 }
+/* Node-name format chips: a hidden component dims and strikes its
+   label; the eye stays a plain inner button (tap, never a drag). */
+#nameFormatChips .tag-chip.is-off {
+  opacity: 0.45;
+}
+#nameFormatChips .tag-chip.is-off .nf-label {
+  text-decoration: line-through;
+}
+.nf-eye {
+  border: none;
+  background: none;
+  padding: 0 2px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.85rem;
+  line-height: 1;
+  color: inherit;
+}
 /* Editable chips (generate picker, tag-edit panel, filter bar)
    reorder by long-press drag; row display chips stay plain taps. */
 #genTagChips .tag-chip,
 .tags-edit-chips .tag-chip,
-#tagFilterChips .tag-chip {
+#tagFilterChips .tag-chip,
+#nameFormatChips .tag-chip {
   touch-action: none;
   cursor: grab;
   -webkit-user-select: none;
