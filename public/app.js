@@ -1585,6 +1585,18 @@ function detailCard(prefix, key, icon, title, desc, url, wide = false) {
   </article>`;
 }
 
+// Wrap a collapsible panel's contents so the panel can slide its
+// height open and shut with the grid-rows trick (see .slide in
+// styles.css): the panel is a 0fr/1fr grid, the inner wrapper clips.
+function makeSlidable(panel) {
+  const inner = document.createElement('div');
+  inner.className = 'slide-inner';
+  while (panel.firstChild) inner.appendChild(panel.firstChild);
+  panel.appendChild(inner);
+  panel.classList.add('slide');
+  return panel;
+}
+
 function buildDetail(item) {
   // The prefix lands UNESCAPED in id attributes below; entry ids are
   // minted alphanumeric, and stripping anything else keeps even a
@@ -1607,6 +1619,7 @@ function buildDetail(item) {
     <div class="actions">
       <button data-copy-target="${prefix}-plainText" type="button" class="secondary small">复制全部明文链接</button>
     </div>`;
+  makeSlidable(detail);
   return detail;
 }
 
@@ -1633,13 +1646,14 @@ async function setDetail(entry, expand) {
     if (!detail) {
       detail = buildDetail(item);
       entry.appendChild(detail);
+      void detail.offsetWidth; // flush the closed state so the first open animates too
     }
-    detail.classList.remove('hidden');
+    detail.classList.add('open');
     entry.classList.add('expanded');
     if (btn) btn.textContent = '收起';
     await loadPlainOnce(detail, item);
   } else {
-    if (detail) detail.classList.add('hidden');
+    if (detail) detail.classList.remove('open');
     entry.classList.remove('expanded');
     if (btn) btn.textContent = '链接';
   }
@@ -2081,7 +2095,7 @@ document.addEventListener('click', async (event) => {
 function buildRetentionPanel(item) {
   const st = item.storage || { mode: 'permanent' };
   const panel = document.createElement('div');
-  panel.className = 'entry-retention hidden';
+  panel.className = 'entry-retention';
   const current = st.mode === 'days'
     ? `${retentionDaysText(st)} 天后删除${st.expiresAt ? '（到期：' + fmtDateTime(st.expiresAt) + '）' : ''}`
     : '永久保存';
@@ -2101,6 +2115,7 @@ function buildRetentionPanel(item) {
       <button type="button" class="secondary small" data-ret-cancel>取消</button>
     </div>
     <p class="hint">选“自定义天数”会从保存这一刻起重新计时；选“永久保存”会去掉过期时间。</p>`;
+  makeSlidable(panel);
   return panel;
 }
 
@@ -2111,8 +2126,9 @@ function openRetentionPanel(entry) {
   if (!panel) {
     panel = buildRetentionPanel(item);
     entry.querySelector('.entry-row').after(panel);
+    void panel.offsetWidth; // flush the closed state so the first open animates too
   }
-  panel.classList.remove('hidden');
+  panel.classList.add('open');
   entry.classList.add('retention-open');
   const btn = entry.querySelector('[data-admin-action="retention"]');
   if (btn) btn.textContent = '收起';
@@ -2120,13 +2136,13 @@ function openRetentionPanel(entry) {
 
 function toggleRetentionPanel(entry) {
   const panel = entry?.querySelector('.entry-retention');
-  if (panel && !panel.classList.contains('hidden')) closeRetentionPanel(entry);
+  if (panel && panel.classList.contains('open')) closeRetentionPanel(entry);
   else openRetentionPanel(entry);
 }
 
 function closeRetentionPanel(entry) {
   const panel = entry?.querySelector('.entry-retention');
-  if (panel) panel.classList.add('hidden');
+  if (panel) panel.classList.remove('open');
   entry?.classList.remove('retention-open');
   const btn = entry?.querySelector('[data-admin-action="retention"]');
   if (btn) btn.textContent = '修改有效期';
@@ -2231,7 +2247,7 @@ function renderTagsPanel(panel) {
 
 function buildTagsPanel(item) {
   const panel = document.createElement('div');
-  panel.className = 'entry-tags-panel hidden';
+  panel.className = 'entry-tags-panel';
   panel.innerHTML = `
     <div class="tags-edit-chips tag-chips"></div>
     <div class="ret-controls">
@@ -2242,6 +2258,7 @@ function buildTagsPanel(item) {
     </div>
     <div class="tags-edit-suggest tag-suggestions"></div>
     <p class="hint">每条最多 10 个标签，单个最长 24 字；点下方已有标签可直接选用，长按标签可拖动排序。保存后会回读 KV 确认。</p>`;
+  makeSlidable(panel);
   // Same boundary rule as the picker: only strings enter the draft.
   panel._tags = (Array.isArray(item.tags) ? item.tags : []).filter((t) => typeof t === 'string');
   renderTagsPanel(panel);
@@ -2261,8 +2278,9 @@ function openTagsPanel(entry) {
   if (!panel) {
     panel = buildTagsPanel(item);
     entry.querySelector('.entry-row').after(panel);
+    void panel.offsetWidth; // flush the closed state so the first open animates too
   }
-  panel.classList.remove('hidden');
+  panel.classList.add('open');
   entry.classList.add('tags-open');
   const btn = entry.querySelector('[data-admin-action="tags"]');
   if (btn) btn.textContent = '收起';
@@ -2270,7 +2288,7 @@ function openTagsPanel(entry) {
 
 function closeTagsPanel(entry) {
   const panel = entry?.querySelector('.entry-tags-panel');
-  if (panel) panel.classList.add('hidden');
+  if (panel) panel.classList.remove('open');
   entry?.classList.remove('tags-open');
   const btn = entry?.querySelector('[data-admin-action="tags"]');
   if (btn) btn.textContent = '标签';
@@ -2278,7 +2296,7 @@ function closeTagsPanel(entry) {
 
 function toggleTagsPanel(entry) {
   const panel = entry?.querySelector('.entry-tags-panel');
-  if (panel && !panel.classList.contains('hidden')) closeTagsPanel(entry);
+  if (panel && panel.classList.contains('open')) closeTagsPanel(entry);
   else openTagsPanel(entry);
 }
 

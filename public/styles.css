@@ -273,6 +273,33 @@ button.small {
   display: none !important;
 }
 
+/* Collapsible panels (entry detail / retention / tags) slide their
+   height open and shut instead of snapping: the panel is a grid whose
+   single row animates between 0fr and 1fr while the inner wrapper
+   clips. Visibility flips with a delay so a closed panel's controls
+   leave the tab order only after it has finished collapsing. */
+.slide {
+  display: grid;
+  grid-template-rows: 0fr;
+  visibility: hidden;
+  transition: grid-template-rows 0.3s ease, visibility 0s 0.3s;
+}
+.slide.open {
+  grid-template-rows: 1fr;
+  visibility: visible;
+  transition: grid-template-rows 0.3s ease;
+}
+.slide > .slide-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .slide,
+  .slide.open {
+    transition: none;
+  }
+}
+
 .section-head {
   display: flex;
   justify-content: space-between;
@@ -658,7 +685,7 @@ button.small {
 
 /* Expanded per-entry link cards (same cards as the result section),
    rendered as a detail block under the entry row. */
-.entry-detail {
+.entry-detail > .slide-inner {
   padding: 4px 14px 20px;
 }
 .entry-detail .sub-grid {
@@ -1173,7 +1200,7 @@ label {
 }
 
 /* ---- Inline retention edit panel ---- */
-.entry-retention {
+.entry-retention > .slide-inner {
   padding: 2px 14px 18px;
 }
 
@@ -1345,7 +1372,7 @@ button.tag-chip:hover {
   color: #0b1220;
   font-weight: 600;
 }
-.entry-tags-panel {
+.entry-tags-panel > .slide-inner {
   padding: 2px 14px 18px;
 }
 .entry-tags-panel .tags-edit-chips {
