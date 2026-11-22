@@ -2405,3 +2405,76 @@ console.log('worker tests passed');
   }
   console.log('name format + source remarks suite: passed');
 }
+
+// --- Overwrite regenerate (backfill -> overwrite in place, 2026-11-22) ---
+{
+  const generateRaw = async (body) => {
+    const r = await worker.fetch(new Request('https://x.pages.dev/api/generate', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ token: 'tok-0123456789abcdef', ...body }),
+    }), env);
+    return { status: r.status, j: await r.json() };
+  };
+  const recOf = (id) => JSON.parse(store.get(`sub:${id}`).value);
+  const owNode = 'vless://f541611e-0aeb-4900-aa47-6e95d4916a49@ow.example.com:443?encryption=none&security=tls&sni=ow.example.com&type=ws#OWNODE';
+
+  const a = await generate({ nodeLinks: owNode, preferredIps: '1.1.1.1', namePrefix: 'OW', note: 'A机', storageMode: 'permanent' });
+  const idA = a.shortId;
+  const createdA = recOf(idA).createdAt;
+  const hashA = recOf(idA).dedupHash;
+  await new Promise((r) => setTimeout(r, 5));
+
+  // 1) overwrite with changed content; retention follows the form
+  const ow = await generate({ nodeLinks: owNode, preferredIps: '2.2.2.2', namePrefix: 'OW', storageMode: 'days', retentionDays: 30, overwriteId: idA });
+  assert.equal(ow.overwritten, true);
+  assert.equal(ow.overwriteMissing, false);
+  assert.equal(ow.shortId, idA, 'overwrite keeps the id');
+  assert.equal(ow.urls.auto, a.urls.auto, 'overwrite keeps the exact link');
+  const recA2 = recOf(idA);
+  assert.ok(recA2.createdAt > createdA, 'createdAt restarts on overwrite');
+  assert.equal(recA2.note, 'A机', 'note preserved when not re-provided');
+  assert.equal(recA2.storage.mode, 'days');
+  assert.equal(recA2.storage.days, 30);
+  assert.notEqual(recA2.dedupHash, hashA);
+  assert.equal(store.get(`dedup:${hashA}`), undefined, 'old dedup key removed');
+  const subA = await getSub(idA, 'plain');
+  assert.equal(subA.status, 200);
+  assert.ok(subA.body.includes('@2.2.2.2'), 'sub serves the overwritten content');
+
+  // 2) dedup identity moved: new content dedups onto A, old content mints fresh
+  const again = await generate({ nodeLinks: owNode, preferredIps: '2.2.2.2', namePrefix: 'OW' });
+  assert.equal(again.deduplicated, true);
+  assert.equal(again.shortId, idA);
+  const oldAgain = await generate({ nodeLinks: owNode, preferredIps: '1.1.1.1', namePrefix: 'OW' });
+  assert.equal(oldAgain.deduplicated, false);
+  assert.notEqual(oldAgain.shortId, idA);
+
+  // 3) unchanged content + overwriteId is a clean overwrite, not a collision
+  const same = await generate({ nodeLinks: owNode, preferredIps: '2.2.2.2', namePrefix: 'OW', overwriteId: idA });
+  assert.equal(same.overwritten, true);
+  assert.equal(same.shortId, idA);
+
+  // 4) collision with a DIFFERENT entry: refused, target untouched
+  const b = await generate({ nodeLinks: owNode, preferredIps: '3.3.3.3', namePrefix: 'OWB' });
+  const idB = b.shortId;
+  const clash = await generateRaw({ nodeLinks: owNode, preferredIps: '2.2.2.2', namePrefix: 'OW', overwriteId: idB });
+  assert.equal(clash.status, 409, JSON.stringify(clash.j));
+  assert.equal(clash.j.ok, false);
+  assert.ok(clash.j.error.includes(idA), 'collision error names the other entry');
+  assert.ok(recOf(idB).nodes.every((n) => n.server === '3.3.3.3'), 'collision leaves the target untouched');
+
+  // 5) missing target: fresh entry + flagged miss + warning
+  const miss = await generate({ nodeLinks: owNode, preferredIps: '4.4.4.4', namePrefix: 'OWM', overwriteId: 'ZZZZZZZZZ9' });
+  assert.equal(miss.overwriteMissing, true);
+  assert.equal(miss.overwritten, false);
+  assert.notEqual(miss.shortId, idA);
+  assert.notEqual(miss.shortId, idB);
+  assert.ok(miss.warnings.some((w) => w.includes('原条目已不存在')), 'missing-target warning surfaced');
+
+  // 6) malformed overwriteId is ignored (plain generate)
+  const plain = await generate({ nodeLinks: owNode, preferredIps: '5.5.5.5', namePrefix: 'OWP', overwriteId: 'x' });
+  assert.equal(plain.overwritten, false);
+  assert.equal(plain.overwriteMissing, false);
+
+  console.log('overwrite regenerate suite: passed');
+}

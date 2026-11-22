@@ -1932,11 +1932,94 @@ async function handleGenerateBody(request, env, url) {
   const dedupHash = await buildDedupHash(dedupBody);
   const dedupKey = `dedup:${dedupHash}`;
 
+  // Overwrite mode: a backfill regenerate names the entry it came from
+  // (body.overwriteId) and replaces THAT entry in place — same id, same
+  // link — whatever changed (owner decision 2026-11-22). Two guards:
+  // content that now matches a DIFFERENT entry is refused outright
+  // (never merge, never duplicate), and a target that no longer exists
+  // falls back to a normal generate, with the response flagging the
+  // miss so the UI can say a new entry was created instead.
+  const overwriteId = typeof body.overwriteId === 'string'
+    && /^[A-Za-z0-9]{10}$/.test(body.overwriteId)
+    ? body.overwriteId
+    : null;
+  let overwriteMissing = false;
+  let overwritten = false;
+
   let id = await env.SUB_STORE.get(dedupKey);
   let record;
   let deduplicated = false;
 
-  if (!id) {
+  if (overwriteId) {
+    const targetRaw = await env.SUB_STORE.get(`sub:${overwriteId}`);
+    let target = null;
+    if (targetRaw) {
+      try {
+        const parsed = JSON.parse(targetRaw);
+        if (parsed && typeof parsed === 'object') target = parsed;
+      } catch {}
+    }
+    if (target && id && id !== overwriteId) {
+      let otherNote = '';
+      const otherRaw = await env.SUB_STORE.get(`sub:${id}`);
+      if (otherRaw) {
+        try {
+          const other = JSON.parse(otherRaw);
+          if (other && typeof other.note === 'string') otherNote = other.note;
+        } catch {}
+      }
+      return json({
+        ok: false,
+        error: `修改后的内容与已有条目${otherNote ? `「${otherNote}」` : ''}（ID：${id}）完全相同，已拦下：没有覆盖原条目，也没有新建条目。请改动任意一项内容后再生成，或先处理那条已有条目。`,
+      }, 409);
+    }
+    if (target) {
+      record = target;
+      const prevNote = (typeof record.note === 'string' ? record.note : '');
+      const oldHash = record.dedupHash || null;
+      if (providedNote !== null) record.note = providedNote;
+      if (providedTags !== null) record.tags = providedTags;
+      record.version = 2;
+      // Reborn in place: same id and link token, but the registration
+      // clock restarts (owner decision 2026-11-22).
+      record.createdAt = new Date().toISOString();
+      record.dedupHash = dedupHash;
+      record.sources = sources;
+      record.options = options;
+      record.inputs = inputs;
+      record.nodes = nodes;
+      if (dynamic) {
+        carryOverFailedSnapshots(dynamic, record.dynamic, sourceResults);
+        record.dynamic = dynamic;
+        record.baseNodes = baseNodes;
+      } else {
+        delete record.dynamic;
+        delete record.baseNodes;
+      }
+      // Retention follows the form, exactly like a fresh generate.
+      record.storage = retention.storage;
+      record.updatedAt = new Date().toISOString();
+      const ttl = applyRetention(record, Date.now());
+      await putRecord(env, overwriteId, record, prevNote, ttl);
+      await env.SUB_STORE.delete(`entrycache:${overwriteId}`);
+      // Move the dedup identity from the old content to the new one.
+      if (oldHash && oldHash !== dedupHash) {
+        const oldKey = `dedup:${oldHash}`;
+        if ((await env.SUB_STORE.get(oldKey)) === overwriteId) {
+          await env.SUB_STORE.delete(oldKey);
+        }
+      }
+      await env.SUB_STORE.put(dedupKey, overwriteId, ttl ? { expirationTtl: ttl } : {});
+      id = overwriteId;
+      overwritten = true;
+    } else {
+      overwriteMissing = true;
+    }
+  }
+
+  if (overwritten) {
+    // Settled by the overwrite branch above: record and id are final.
+  } else if (!id) {
     id = await createUniqueShortId(env);
     record = {
       version: 2,
@@ -2045,6 +2128,8 @@ async function handleGenerateBody(request, env, url) {
   return json({
     ok: true,
     deduplicated,
+    overwritten,
+    overwriteMissing,
     shortId: id,
     urls: {
       auto: withToken(''),
@@ -2087,6 +2172,12 @@ async function handleGenerateBody(request, env, url) {
         }
       : null,
     warnings: [
+      ...(overwriteMissing && !deduplicated
+        ? ['原条目已不存在（可能已被删除），本次已新建条目，新链接与原链接不同。']
+        : []),
+      ...(overwriteMissing && deduplicated
+        ? ['原条目已不存在（可能已被删除）；本次内容与一条已有条目相同，已刷新那一条。']
+        : []),
       ...(skippedLines > 0 ? [`有 ${skippedLines} 行节点链接无法解析或端口不可用，已跳过。`] : []),
       ...(invalidLiteralLines.length
         ? [`有 ${invalidLiteralLines.length} 行优选地址不是合法的 IP 或域名，已跳过（例如「${invalidLiteralLines[0].slice(0, 40)}」；若它其实是来源链接，请以 https:// 开头）。`]
@@ -2095,10 +2186,10 @@ async function handleGenerateBody(request, env, url) {
       // backfill restores) is capped: say so, or the tail silently
       // vanishes from every future backfill-and-regenerate.
       ...(String(body.nodeLinks || '').length > 100000
-        ? ['节点链接过长：本次已完整生成，但存档仅保留前 100000 字符，日后用「回填到生成区」再生成时尾部链接会缺失（且会生成新条目）。']
+        ? ['节点链接过长：本次已完整生成，但存档仅保留前 100000 字符，日后用「回填到生成区」再生成时尾部链接会缺失（且会覆盖原条目）。']
         : []),
       ...(mixedText.length > 50000
-        ? ['优选地址框过长：本次已完整生成，但存档仅保留前 50000 字符，日后用「回填到生成区」再生成时尾部内容会缺失（且会生成新条目）。']
+        ? ['优选地址框过长：本次已完整生成，但存档仅保留前 50000 字符，日后用「回填到生成区」再生成时尾部内容会缺失（且会覆盖原条目）。']
         : []),
       ...(dynamic && sourceUrls.length === 1 && !sourceInfo.failed.length
         ? [`动态订阅：将自动跟随来源的最新优选 IP（约每小时刷新；来源不可用时用上次快照兜底）。来源现有 ${sourceInfo.total} 个优选地址，本次使用前 ${dynamic.limit} 个。`]

@@ -79,6 +79,9 @@ const submitBtn = byId('submitBtn');
 const fillDemoBtn = byId('fillDemoBtn');
 const resultSection = byId('resultSection');
 const warningBox = byId('warningBox');
+const overwriteBanner = byId('overwriteBanner');
+const overwriteLabel = byId('overwriteLabel');
+const overwriteCancelBtn = byId('overwriteCancel');
 const previewBody = byId('previewBody');
 
 const autoUrl = byId('autoUrl');
@@ -558,7 +561,26 @@ if (genTagSuggestions) {
   });
 }
 
+// Overwrite target: set by the admin list's backfill action. While a
+// target is armed, the next generate replaces that entry in place
+// (same id, same link); the banner in the form says so, and the owner
+// can disarm it at any time. A successful generate consumes the
+// target; filling demo data disarms it too (a fresh start must never
+// silently overwrite an entry).
+let overwriteTargetId = null;
+function setOverwriteTarget(id, label) {
+  overwriteTargetId = id || null;
+  if (overwriteBanner) overwriteBanner.hidden = !overwriteTargetId;
+  if (overwriteTargetId && overwriteLabel) {
+    overwriteLabel.textContent = label || overwriteTargetId;
+  }
+}
+if (overwriteCancelBtn) {
+  overwriteCancelBtn.addEventListener('click', () => setOverwriteTarget(null));
+}
+
 fillDemoBtn.addEventListener('click', () => {
+  setOverwriteTarget(null);
   setGenTags([], false);
   byId('nodeLinks').value = demoVmess;
   byId('preferredIps').value = demoIps;
@@ -586,6 +608,7 @@ form.addEventListener('submit', async (event) => {
     // Only sent when the tag picker was touched (see its section):
     // untouched must leave a refreshed entry's tags unchanged.
     ...(genTagsTouched ? { tags: [...genTags] } : {}),
+    ...(overwriteTargetId ? { overwriteId: overwriteTargetId } : {}),
     storageMode: byId('storageMode')?.value || 'permanent',
     retentionDays: Number(byId('retentionDays')?.value || 30),
   };
@@ -601,6 +624,7 @@ form.addEventListener('submit', async (event) => {
       throw new Error((data && data.error) || '生成失败');
     }
     genTagVocab = null; // this generate may have introduced new tags
+    setOverwriteTarget(null); // a successful generate consumes the overwrite target
 
     autoUrl.value = data.urls.auto;
     rawUrl.value = data.urls.raw;
@@ -1949,8 +1973,9 @@ if (adminBody) {
 }
 
 // Load an entry's stored inputs back into the generate form for editing.
-// Regenerating afterwards follows the usual rules: changed content makes a
-// new entry, unchanged content refreshes the same entry.
+// The backfill handler also arms the entry as the overwrite target, so
+// regenerating replaces that entry in place (same link) — see
+// setOverwriteTarget above.
 function fillGenerateForm(bf) {
   const setValue = (id, value) => {
     const el = byId(id);
@@ -2001,9 +2026,10 @@ document.addEventListener('click', async (event) => {
       if (!resp.ok || !data?.ok) throw new Error((data && data.error) || '回填失败，请重试');
       if (!data.backfill) throw new Error('这条记录缺少可还原的数据，无法回填');
       fillGenerateForm(data.backfill);
+      setOverwriteTarget(id, (typeof data.note === 'string' && data.note.trim()) ? data.note.trim() : id);
       adminMsg.textContent = data.backfill.exact
-        ? `条目 ${id} 已回填到生成区，修改后点「生成订阅」即可。`
-        : `条目 ${id} 已按已存数据还原并回填到生成区（老条目，可能与原始输入略有差异），修改后点「生成订阅」即可。`;
+        ? `条目 ${id} 已回填到生成区，点「生成订阅」将覆盖原条目（链接不变）。`
+        : `条目 ${id} 已按已存数据还原并回填到生成区（老条目，可能与原始输入略有差异），点「生成订阅」将覆盖原条目（链接不变）。`;
     } catch (err) {
       adminMsg.textContent = err.message || '回填失败，请重试';
     } finally {
