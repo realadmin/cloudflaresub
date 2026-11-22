@@ -1205,7 +1205,8 @@ label {
 }
 
 /* Entry tags: chips in the picker, the rows, the filter bar and the
-   inline editor all share one pill look. */
+   inline editor all share one flat-solid look (owner's pick, scheme D:
+   borderless filled blocks, small radius, no outline). */
 .tag-chips {
   display: flex;
   flex-wrap: wrap;
@@ -1216,12 +1217,13 @@ label {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 10px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: rgba(96, 165, 250, 0.08);
+  padding: 5px 11px;
+  border: none;
+  border-radius: 8px;
+  background: rgba(148, 163, 184, 0.16);
   color: var(--text);
   font-size: 0.85rem;
+  font-weight: 550;
   line-height: 1.5;
   min-height: 32px;
 }
@@ -1231,21 +1233,21 @@ button.tag-chip {
   font-size: 0.85rem;
 }
 button.tag-chip:hover {
-  border-color: var(--accent);
+  background: rgba(148, 163, 184, 0.27);
 }
 .tag-chip.is-on {
   background: var(--accent);
-  border-color: var(--accent);
   color: #0b1220;
   font-weight: 600;
 }
-/* Node-name format chips: a hidden component dims and strikes its
-   label; the eye stays a plain inner button (tap, never a drag). */
-#nameFormatChips .tag-chip.is-off {
-  opacity: 0.45;
+button.tag-chip.is-on:hover {
+  background: var(--accent);
 }
-#nameFormatChips .tag-chip.is-off .nf-label {
-  text-decoration: line-through;
+/* Node-name format chips: a hidden component loses its fill and
+   dims; the eye stays a plain inner button (tap, never a drag). */
+#nameFormatChips .tag-chip.is-off {
+  opacity: 0.38;
+  background: transparent;
 }
 .nf-eye {
   border: none;
@@ -1272,9 +1274,9 @@ button.tag-chip:hover {
    (left/top set inline); a dashed placeholder holds its slot, and
    siblings glide via FLIP transforms — no layout feedback, no jitter. */
 .tag-chip.dragging {
-  opacity: 0.95;
+  opacity: 0.97;
   scale: 1.06;
-  border-color: var(--accent);
+  background: rgba(96, 165, 250, 0.3);
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.5);
   cursor: grabbing;
   margin: 0;
@@ -1283,7 +1285,7 @@ button.tag-chip:hover {
   display: inline-block;
   box-sizing: border-box;
   border: 1.5px dashed rgba(96, 165, 250, 0.55);
-  border-radius: 999px;
+  border-radius: 8px;
   background: rgba(96, 165, 250, 0.07);
 }
 /* Filter-bar trash zone: the label turns into a bin during a drag. */
