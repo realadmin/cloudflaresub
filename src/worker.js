@@ -712,6 +712,55 @@ function compareVersions(a, b) {
   return 0;
 }
 
+// Version discovery, first choice: the web redirect. The
+// unauthenticated GitHub API is rate-limited per egress IP, and
+// Workers egress IPs are shared with everyone, so the API check
+// used to fail spuriously for days at a time (the same failure
+// TGbot-D1 hit and fixed this way). github.com's /releases/latest
+// answers 302 to the newest release's tag page and is not subject
+// to that limit.
+async function fetchLatestReleaseViaWeb() {
+  const resp = await fetch(`https://github.com/${UPDATE_REPO}/releases/latest`, {
+    redirect: 'manual',
+    headers: { 'user-agent': 'cloudflaresub (update check)' },
+    signal: AbortSignal.timeout(8000),
+  });
+  const location = resp.headers.get('location') || '';
+  const match = location.match(/\/releases\/tag\/([^/?#]+)/);
+  if (!match) throw new Error(`GitHub web redirect gave no tag (HTTP ${resp.status})`);
+  let rawTag = match[1];
+  try { rawTag = decodeURIComponent(rawTag); } catch {}
+  return { tag: rawTag, url: `https://github.com/${UPDATE_REPO}/releases/tag/${rawTag}` };
+}
+
+// Second choice: the GitHub API, kept for the case the web route
+// misbehaves. Setting the optional GITHUB_TOKEN secret (any token
+// with public read access) raises its rate ceiling for this site.
+async function fetchLatestReleaseViaApi(env) {
+  const resp = await fetch(`https://api.github.com/repos/${UPDATE_REPO}/releases/latest`, {
+    headers: {
+      'user-agent': 'cloudflaresub (update check)',
+      accept: 'application/vnd.github+json',
+      ...(env.GITHUB_TOKEN ? { authorization: `Bearer ${env.GITHUB_TOKEN}` } : {}),
+    },
+    signal: AbortSignal.timeout(5000),
+  });
+  if (!resp.ok) throw new Error(`GitHub HTTP ${resp.status}`);
+  const data = await resp.json();
+  if (!data.tag_name) throw new Error('GitHub response has no tag_name');
+  return { tag: String(data.tag_name), url: data.html_url || '' };
+}
+
+// Web first, API as the fallback; only when both fail does the
+// caller's stale/failed handling kick in.
+async function fetchLatestReleaseAny(env) {
+  try {
+    return await fetchLatestReleaseViaWeb();
+  } catch {
+    return fetchLatestReleaseViaApi(env);
+  }
+}
+
 async function getLatestRelease(env, forceRetry = false) {
   let cached = null;
   try {
@@ -743,23 +792,9 @@ async function getLatestRelease(env, forceRetry = false) {
     }
   }
   try {
-    const resp = await fetch(`https://api.github.com/repos/${UPDATE_REPO}/releases/latest`, {
-      headers: {
-        'user-agent': 'cloudflaresub (update check)',
-        accept: 'application/vnd.github+json',
-        // Unauthenticated GitHub API calls share a tight per-IP rate
-        // limit, and Workers egress IPs are shared with everyone: on
-        // a busy egress the update check used to fail spuriously.
-        // Setting the optional GITHUB_TOKEN secret (any token with
-        // public read access) raises the ceiling for this site.
-        ...(env.GITHUB_TOKEN ? { authorization: `Bearer ${env.GITHUB_TOKEN}` } : {}),
-      },
-      signal: AbortSignal.timeout(5000),
-    });
-    if (!resp.ok) throw new Error(`GitHub HTTP ${resp.status}`);
-    const data = await resp.json();
-    const tag = String(data.tag_name || '').replace(/^v/, '');
-    if (!tag) throw new Error('GitHub response has no tag_name');
+    const rel = await fetchLatestReleaseAny(env);
+    const tag = String(rel.tag || '').replace(/^v/, '');
+    if (!tag) throw new Error('GitHub response has no tag');
     if (!/^\d+\.\d+\.\d+$/.test(tag)) {
       // Not a version-shaped tag: the release workflow's manual
       // dispatch channel tags its test builds v<YYYY.MM.DD>-<run>,
@@ -774,7 +809,7 @@ async function getLatestRelease(env, forceRetry = false) {
     }
     const fresh = {
       tag,
-      url: data.html_url || `https://github.com/${UPDATE_REPO}/releases`,
+      url: rel.url || `https://github.com/${UPDATE_REPO}/releases`,
       checkedAt: now,
       lastAttempt: now,
     };

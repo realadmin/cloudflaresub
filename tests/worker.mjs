@@ -2478,3 +2478,61 @@ console.log('worker tests passed');
 
   console.log('overwrite regenerate suite: passed');
 }
+
+// --- Version check: web-redirect discovery suite ---
+// The unauthenticated API is rate-limited per egress IP; discovery
+// now goes through github.com's /releases/latest 302 first and only
+// falls back to the API when the web route misbehaves.
+{
+  const vStore = new Map();
+  const e = {
+    SUB_STORE: {
+      async get(k) { return vStore.get(k)?.value ?? null; },
+      async put(k, v, o = {}) { vStore.set(k, { value: v, metadata: o.metadata }); },
+      async delete(k) { vStore.delete(k); },
+      async list() { return { keys: [], list_complete: true, cursor: '' }; },
+    },
+    ASSETS: { async fetch() { return new Response('HOME'); } },
+  };
+  const realFetch = globalThis.fetch;
+  let webMode = 'ok';
+  let apiCalls = 0;
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    if (u === 'https://github.com/realadmin/cloudflaresub/releases/latest') {
+      if (webMode === 'ok') {
+        return new Response(null, { status: 302, headers: { location: 'https://github.com/realadmin/cloudflaresub/releases/tag/v9.9.9' } });
+      }
+      if (webMode === 'datetag') {
+        return new Response(null, { status: 302, headers: { location: 'https://github.com/realadmin/cloudflaresub/releases/tag/v2026.11.4-3' } });
+      }
+      return new Response('oops', { status: 200 }); // no location header at all
+    }
+    if (u.includes('api.github.com')) { apiCalls++; throw new Error('api rate limited'); }
+    throw new Error('unexpected fetch ' + u);
+  };
+  const getVersion = () => worker.fetch(new Request('https://x.pages.dev/api/version'), e).then((r) => r.json());
+  try {
+    const v1 = await getVersion();
+    assert.equal(v1.latest, '9.9.9', 'latest comes from the web redirect, not the API');
+    assert.equal(v1.updateAvailable, true);
+    assert.equal(v1.releaseUrl, 'https://github.com/realadmin/cloudflaresub/releases/tag/v9.9.9', 'release URL is built from the redirect tag');
+    assert.equal(v1.checkStatus, 'ok');
+    assert.equal(apiCalls, 0, 'the rate-limited API is never touched when the web route works');
+
+    vStore.delete('sys:latest-release');
+    webMode = 'datetag';
+    const v2 = await getVersion();
+    assert.equal(v2.checkStatus, 'ok', 'a date tag via the web route is still a successful check');
+    assert.equal(v2.latest, null, 'a date tag is not reported as the latest version');
+    assert.equal(v2.updateAvailable, false);
+
+    vStore.delete('sys:latest-release');
+    webMode = 'broken';
+    const v3 = await getVersion();
+    assert.equal(v3.checkStatus, 'failed', 'web broken + API down reports failed, as before');
+    assert.equal(v3.latest, null);
+    assert.ok(apiCalls > 0, 'the API fallback was attempted after the web route failed');
+  } finally { globalThis.fetch = realFetch; }
+  console.log('version web-redirect suite: web-first discovery, API fallback, date-tag ignored: passed');
+}
