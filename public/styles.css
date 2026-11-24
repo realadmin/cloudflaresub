@@ -118,6 +118,12 @@ p {
    block at the end of this file). */
 .workbench {
   display: grid;
+  /* minmax(0, 1fr), not a bare implicit column: a grid item's automatic
+     minimum is its min-content, and the result section's preview table
+     carries min-width: 720px (it scrolls inside its own wrap) — with an
+     unbounded track that min-content inflates the whole workbench past
+     the container on narrow screens and the page overflows sideways. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 24px;
 }
 .workbench #resultSection {
