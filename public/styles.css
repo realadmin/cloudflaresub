@@ -113,6 +113,17 @@ p {
   grid-template-columns: minmax(0, 1.3fr) minmax(320px, 0.7fr);
 }
 
+/* Generator + result wrapper: single column normally; on wide
+   screens it becomes the two-column workbench (see the min-width
+   block at the end of this file). */
+.workbench {
+  display: grid;
+  gap: 24px;
+}
+.workbench #resultSection {
+  margin-top: 0;
+}
+
 .compact {
   gap: 16px;
   align-items: end;
@@ -127,7 +138,6 @@ p {
 }
 
 form.card,
-.tips,
 #resultSection,
 #adminSection {
   padding: 24px;
@@ -252,21 +262,6 @@ button.secondary {
 button.small {
   min-width: 74px;
   padding: 12px 14px;
-}
-
-.tips ul,
-.client-box ul {
-  padding-left: 18px;
-  margin: 0;
-  color: var(--muted);
-  line-height: 1.8;
-}
-
-.client-box {
-  padding: 16px;
-  border-radius: 16px;
-  background: rgba(59, 130, 246, 0.08);
-  border: 1px solid rgba(96, 165, 250, 0.14);
 }
 
 .hidden {
@@ -407,14 +402,12 @@ button.small {
 
   .card,
   form.card,
-  .tips,
   #resultSection {
     border-radius: 16px;
   }
 
   .hero,
   form.card,
-  .tips,
   #resultSection,
   #adminSection {
     padding: 18px;
@@ -1407,4 +1400,20 @@ button.tag-chip.is-on:hover {
 }
 .entry-retention .hint {
   margin-top: 10px;
+}
+
+/* ---- Wide screens: workbench layout (scheme A) ----
+   From 1200px up the page widens and the generator and the result
+   sit side by side, same screen; narrower layouts are unchanged. */
+@media (min-width: 1200px) {
+  .container {
+    width: min(1400px, calc(100% - 32px));
+  }
+  .workbench {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+  }
+  .page-diag {
+    max-width: 1400px;
+  }
 }

@@ -72,7 +72,7 @@
         </div>
       </section>
 
-      <section class="grid two-col">
+      <div class="workbench">
         <form id="generator-form" class="card stack-lg">
           <div class="section-head">
             <div>
@@ -192,28 +192,6 @@ https://example.com/ips.txt"
             <button id="fillDemoBtn" type="button" class="secondary">填入演示数据</button>
           </div>
         </form>
-
-        <aside class="card stack-md tips">
-          <h2>说明</h2>
-          <ul>
-            <li>不会帮你找优选 IP，只负责把你现成的优选 IP 替换进节点。</li>
-            <li>生成的链接是“同一份节点内容”的不同导出格式，分别给不同客户端使用。</li>
-            <li>推荐勾选“保留原 Host / SNI”，这样更适合 Cloudflare CDN 场景。</li>
-            <li>生成时可选<strong>永久保存</strong>，或自定义天数后由 KV 自动删除；不需要的条目也可以在页面下方的“KV 条目管理”里手动删除。</li>
-            <li>订阅链接里的节点信息会通过服务端密钥加密，请不要把链接公开分享。</li>
-          </ul>
-
-          <div class="client-box">
-            <h3>客户端怎么用</h3>
-            <ul>
-              <li><strong>V2rayN：</strong> 用原始订阅链接</li>
-              <li><strong>Shadowrocket：</strong> 用原始订阅链接</li>
-              <li><strong>Clash / Mihomo：</strong> 用 Clash 订阅链接</li>
-              <li><strong>Surge：</strong> 用 Surge 订阅链接</li>
-            </ul>
-          </div>
-        </aside>
-      </section>
 
       <section id="resultSection" class="card stack-lg">
         <div class="section-head result-head">
@@ -389,6 +367,8 @@ https://example.com/ips.txt"
           </div>
         </div>
       </section>
+      </div>
+
       <section id="adminSection" class="card stack-lg">
         <div class="section-head">
           <div>
