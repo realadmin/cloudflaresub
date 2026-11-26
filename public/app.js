@@ -2422,29 +2422,52 @@ if (backTopBtn) {
   });
 }
 
-// ------------- Quick nav: liquid-glass section dock -------------
+// ------------- Quick nav: section dock -------------
+// On wide screens the generate form and the result section sit side by
+// side in one workbench row, so their two dock buttons fuse into a
+// single fused button (animated); below 1200px they stay separate.
+// The scrollspy marks a section current once its top has passed a line
+// at 40% of the viewport height - the last such section wins, so the
+// admin section lights up as soon as its heading crosses the line,
+// even while the tall workbench still fills the upper screen. A click
+// locks the highlight to the clicked button until the smooth scroll
+// settles, so the spy cannot flash another section mid-journey.
 const quickNavBtns = Array.from(document.querySelectorAll('.quick-nav'));
 if (quickNavBtns.length) {
-  const quickSections = quickNavBtns
-    .map((btn) => byId(btn.dataset.target))
-    .filter(Boolean);
+  const quickSections = ['generator-form', 'resultSection', 'adminSection'].map(byId).filter(Boolean);
+  const genBtn = quickNavBtns.find((b) => b.dataset.target === 'generator-form');
+  const resBtn = quickNavBtns.find((b) => b.dataset.target === 'resultSection');
+  const fusedBtn = quickNavBtns.find((b) => b.dataset.target === 'workbench');
+  const wideMq = window.matchMedia ? window.matchMedia('(min-width: 1200px)') : { matches: false };
+  let navFused = false;
+  let fuseTimer = null;
+  const reduceMotion = () => !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  const navKeyFor = (id) => (navFused && (id === 'generator-form' || id === 'resultSection') ? 'workbench' : id);
   const setActiveQuickNav = (id) => {
-    quickNavBtns.forEach((btn) => btn.classList.toggle('active', btn.dataset.target === id));
+    const key = navKeyFor(id);
+    quickNavBtns.forEach((btn) => btn.classList.toggle('active', btn.dataset.target === key));
   };
+  // Click lock: while a click-initiated scroll is travelling, the spy
+  // must not rewrite the highlight. Released when scrolling has been
+  // quiet for 150ms, when the spy reaches the locked section anyway,
+  // when the user grabs the scroll (wheel / touch), or after 1.5s.
+  let navLockKey = '';
+  let navLockSettle = null;
+  let navLockMax = null;
+  const clearNavLockTimers = () => { clearTimeout(navLockSettle); clearTimeout(navLockMax); navLockSettle = null; navLockMax = null; };
+  const releaseNavLock = () => { if (!navLockKey) return; navLockKey = ''; clearNavLockTimers(); updateQuickSpy(); };
   quickNavBtns.forEach((btn) => {
     btn.addEventListener('click', () => {
-      const target = byId(btn.dataset.target);
+      const key = btn.dataset.target;
+      const target = byId(key === 'workbench' ? 'generator-form' : key);
       if (!target) return;
-      setActiveQuickNav(btn.dataset.target);
-      const reduce = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-      target.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
+      setActiveQuickNav(key === 'workbench' ? 'generator-form' : key);
+      navLockKey = key;
+      clearNavLockTimers();
+      navLockMax = setTimeout(releaseNavLock, 1500);
+      target.scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block: 'start' });
     });
   });
-  // Scrollspy: the section crossing a line at 40% of the viewport height
-  // is current. Sections are tried in document order, so when the
-  // side-by-side generate/result columns both cross the line on wide
-  // screens 生成 wins; if no section contains the line, the last section
-  // whose top has passed it stays current.
   const raf = window.requestAnimationFrame
     ? window.requestAnimationFrame.bind(window)
     : (fn) => setTimeout(fn, 0);
@@ -2454,23 +2477,65 @@ if (quickNavBtns.length) {
     const line = window.innerHeight * 0.4;
     let activeId = '';
     for (const sec of quickSections) {
-      const r = sec.getBoundingClientRect();
-      if (r.top <= line && r.bottom > line) { activeId = sec.id; break; }
+      if (sec.getBoundingClientRect().top <= line) activeId = sec.id;
     }
-    if (!activeId) {
-      for (const sec of quickSections) {
-        if (sec.getBoundingClientRect().top <= line) activeId = sec.id;
-      }
+    if (!activeId && quickSections.length) activeId = quickSections[0].id;
+    if (!activeId) return;
+    if (navLockKey) {
+      if (navKeyFor(activeId) === navLockKey) { navLockKey = ''; clearNavLockTimers(); }
+      else return;
     }
-    if (activeId) setActiveQuickNav(activeId);
+    setActiveQuickNav(activeId);
   };
   const onSpyScroll = () => {
+    if (navLockKey) { clearTimeout(navLockSettle); navLockSettle = setTimeout(releaseNavLock, 150); }
     if (spyTicking) return;
     spyTicking = true;
     raf(updateQuickSpy);
   };
   window.addEventListener('scroll', onSpyScroll, { passive: true });
   window.addEventListener('resize', onSpyScroll);
+  window.addEventListener('wheel', releaseNavLock, { passive: true });
+  window.addEventListener('touchstart', releaseNavLock, { passive: true });
+  // Fusion: swap the generate/result pair for the fused button at the
+  // workbench breakpoint, animated unless reduced motion is preferred.
+  const applyFusion = (instant) => {
+    if (!genBtn || !resBtn || !fusedBtn) return;
+    const want = !!wideMq.matches;
+    if (want === navFused) return;
+    navFused = want;
+    clearTimeout(fuseTimer);
+    const swap = () => {
+      genBtn.hidden = want;
+      resBtn.hidden = want;
+      fusedBtn.hidden = !want;
+      genBtn.classList.remove('merge-out-a');
+      resBtn.classList.remove('merge-out-b');
+      fusedBtn.classList.remove('merge-out-quick');
+      updateQuickSpy();
+    };
+    if (instant || reduceMotion()) { swap(); return; }
+    if (want) {
+      genBtn.classList.add('merge-out-a');
+      resBtn.classList.add('merge-out-b');
+      fuseTimer = setTimeout(() => {
+        swap();
+        fusedBtn.classList.add('merge-in');
+        setTimeout(() => fusedBtn.classList.remove('merge-in'), 260);
+      }, 200);
+    } else {
+      fusedBtn.classList.add('merge-out-quick');
+      fuseTimer = setTimeout(() => {
+        swap();
+        genBtn.classList.add('split-in-a');
+        resBtn.classList.add('split-in-b');
+        setTimeout(() => { genBtn.classList.remove('split-in-a'); resBtn.classList.remove('split-in-b'); }, 260);
+      }, 150);
+    }
+  };
+  if (typeof wideMq.addEventListener === 'function') wideMq.addEventListener('change', () => applyFusion(false));
+  else if (typeof wideMq.addListener === 'function') wideMq.addListener(() => applyFusion(false));
+  applyFusion(true);
   updateQuickSpy();
 }
 
