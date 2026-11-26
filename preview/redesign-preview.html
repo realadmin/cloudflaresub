@@ -1,0 +1,1992 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="graphite">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>优选IP订阅生成器</title>
+    <meta
+      name="description"
+      content="将自建 vmess/vless/trojan 节点批量替换为优选 IP，并导出 Clash、V2rayN、Shadowrocket、Surge 可用订阅链接。"
+    />
+    <link rel="icon" href="data:image/svg+xml;base64,PHN2ZyBjbGlwLXJ1bGU9ImV2ZW5vZGQiIGZpbGwtcnVsZT0iZXZlbm9kZCIgaGVpZ2h0PSI1MTIiIHN0cm9rZS1saW5lam9pbj0icm91bmQiIHN0cm9rZS1taXRlcmxpbWl0PSIyIiB2aWV3Qm94PSIwIDAgNDggNDgiIHdpZHRoPSI1MTIiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgeG1sbnM6eGxpbms9Imh0dHA6Ly93d3cudzMub3JnLzE5OTkveGxpbmsiPjxsaW5lYXJHcmFkaWVudCBpZD0iX0xpbmVhcjEiIGdyYWRpZW50VHJhbnNmb3JtPSJtYXRyaXgoMjggLTI5IDI5IDI4IDEyNzkuNTcgMTMxLjc4NSkiIGdyYWRpZW50VW5pdHM9InVzZXJTcGFjZU9uVXNlIiB4MT0iMCIgeDI9IjEiIHkxPSIwIiB5Mj0iMCI+PHN0b3Agb2Zmc2V0PSIwIiBzdG9wLWNvbG9yPSIjMDA1NmUwIi8+PHN0b3Agb2Zmc2V0PSIuMDEiIHN0b3AtY29sb3I9IiMwMDU2ZTAiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiMwMGU1YjgiLz48L2xpbmVhckdyYWRpZW50PjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKC0xNTkgLTUzKSI+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoLTExMDkuNTcgLTQwLjc4NSkiPjxnIGlkPSJuZ2ljb24iPjxwYXRoIGQ9Im0xMjgxLjU5IDExMi40OTVzLTIuMDUgMi4wNTUtNC4zNSA0LjM1NmMtMi4xMyAyLjEyMy0zLjMyIDUuMDAzLTMuMzIgOC4wMDYgMCAzLjAwMiAxLjE5IDUuODgyIDMuMzIgOC4wMDUuMDguMDg0LjE2LjE2OC4yNS4yNTIgMi4xMiAyLjEyMyA1IDMuMzE2IDggMy4zMTYgMy4wMSAwIDUuODktMS4xOTMgOC4wMS0zLjMxNiAyLjMtMi4zIDQuMzYtNC4zNTYgNC4zNi00LjM1Ni45Ny0uOTc1Ljk3LTIuNTYgMC0zLjUzNS0uOTgtLjk3Ni0yLjU2LS45NzYtMy41NCAwIDAgMC0yLjA2IDIuMDU1LTQuMzYgNC4zNTYtMS4xOCAxLjE4NS0yLjc5IDEuODUxLTQuNDcgMS44NTEtMS42NyAwLTMuMjgtLjY2Ni00LjQ3LTEuODUxbC0uMjUtLjI1MmMtMS4xOC0xLjE4Ni0xLjg1LTIuNzk0LTEuODUtNC40NyAwLTEuNjc3LjY3LTMuMjg1IDEuODUtNC40NzEgMi4zLTIuMyA0LjM2LTQuMzU2IDQuMzYtNC4zNTYuOTctLjk3NS45Ny0yLjU1OSAwLTMuNTM1LS45OC0uOTc2LTIuNTYtLjk3Ni0zLjU0IDB6bTE0Ljg4LTIuMTQ4LTExLjM0IDExLjM0Yy0uOTguOTc2LS45OCAyLjU2IDAgMy41MzYuOTcuOTc1IDIuNTYuOTc1IDMuNTMgMGwxMS4zNC0xMS4zNDFjLjk4LS45NzYuOTgtMi41NiAwLTMuNTM1LS45Ny0uOTc2LTIuNTYtLjk3Ni0zLjUzIDB6bTcuMDQgMTIuNzUzczIuMDctMi4wNjkgNC4zOC00LjM4YzIuMTMtMi4xMjMgMy4zMi01LjAwMyAzLjMyLTguMDA2IDAtMy4wMDItMS4xOS01Ljg4Mi0zLjMyLTguMDA1LS4wOC0uMDg0LS4xNi0uMTY4LS4yNS0uMjUyLTIuMTItMi4xMjQtNS0zLjMxNi04LTMuMzE2LTMuMDEgMC01Ljg5IDEuMTkyLTguMDEgMy4zMTYtMi4zIDIuMjk5LTQuMzUgNC4zNTQtNC4zNSA0LjM1NC0uOTguOTc2LS45OCAyLjU2IDAgMy41MzYuOTcuOTc1IDIuNTYuOTc1IDMuNTMgMCAwIDAgMi4wNi0yLjA1NSA0LjM2LTQuMzU1IDEuMTgtMS4xODUgMi43OS0xLjg1MSA0LjQ3LTEuODUxIDEuNjcgMCAzLjI4LjY2NiA0LjQ3IDEuODUxbC4yNS4yNTJjMS4xOCAxLjE4NiAxLjg1IDIuNzk0IDEuODUgNC40NyAwIDEuNjc3LS42NyAzLjI4NS0xLjg1IDQuNDcxLTIuMzEgMi4zMTEtNC4zOCA0LjM3OS00LjM4IDQuMzc5LS45OC45NzYtLjk4IDIuNTYgMCAzLjUzNi45Ny45NzUgMi41Ni45NzUgMy41MyAweiIgZmlsbD0idXJsKCNfTGluZWFyMSkiLz48L2c+PC9nPjwvZz48L3N2Zz4=" type="image/svg+xml">
+    
+    
+  <style>:root {
+  color-scheme: dark;
+  --bg: #0b1220;
+  --card: rgba(15, 23, 42, 0.86);
+  --line: rgba(148, 163, 184, 0.18);
+  --text: #e5eefc;
+  --muted: #9fb0cb;
+  --accent: #60a5fa;
+  --accent-2: #34d399;
+  --warning: #f59e0b;
+  --danger: #f87171;
+  --shadow: 0 18px 60px rgba(2, 6, 23, 0.38);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: var(--text);
+  background-color: #0b1220;
+}
+
+/* The page backdrop lives in a layer pinned to the viewport, NOT on
+   body: painted on body, the gradients are sized by the full document
+   height, so anything that changes the page height (expand-all in the
+   admin list, search filtering, a single entry opening) rescales them
+   and the whole page visibly changes colour. Fixed to the viewport,
+   the backdrop depends only on the screen and stays constant.
+   (A fixed pseudo-element, not background-attachment: fixed, which
+   iOS Safari renders unreliably.) */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at top right, rgba(52, 211, 153, 0.12), transparent 30%),
+    radial-gradient(circle at top left, rgba(96, 165, 250, 0.18), transparent 26%),
+    linear-gradient(180deg, #08101e 0%, #0b1220 100%);
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.container {
+  width: min(1120px, calc(100% - 32px));
+  margin: 40px auto 56px;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(18px);
+}
+
+.hero {
+  display: grid;
+  grid-template-columns: 1.6fr 0.9fr;
+  gap: 24px;
+  padding: 28px;
+  margin-bottom: 24px;
+}
+
+.hero h1,
+h2,
+h3,
+p {
+  margin-top: 0;
+}
+
+.hero h1 {
+  margin-bottom: 12px;
+  font-size: clamp(2rem, 4vw, 3rem);
+}
+
+.lead {
+  color: var(--muted);
+  font-size: 1.05rem;
+  line-height: 1.7;
+  margin-bottom: 0;
+}
+
+.hero-note {
+  padding: 18px;
+  border-radius: 16px;
+  background: rgba(15, 118, 110, 0.12);
+  border: 1px solid rgba(52, 211, 153, 0.18);
+  align-self: start;
+}
+
+.eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: var(--accent-2);
+  font-size: 0.8rem;
+  margin-bottom: 10px;
+}
+
+.grid {
+  display: grid;
+  gap: 24px;
+}
+
+.two-col {
+  grid-template-columns: minmax(0, 1.3fr) minmax(320px, 0.7fr);
+}
+
+/* Generator + result wrapper: single column normally; on wide
+   screens it becomes the two-column workbench (see the min-width
+   block at the end of this file). */
+.workbench {
+  display: grid;
+  /* minmax(0, 1fr), not a bare implicit column: a grid item's automatic
+     minimum is its min-content, and the result section's preview table
+     carries min-width: 720px (it scrolls inside its own wrap) — with an
+     unbounded track that min-content inflates the whole workbench past
+     the container on narrow screens and the page overflows sideways. */
+  grid-template-columns: minmax(0, 1fr);
+  gap: 24px;
+}
+.workbench #resultSection {
+  margin-top: 0;
+}
+
+.compact {
+  gap: 16px;
+  align-items: end;
+}
+
+.stack-lg > * + * {
+  margin-top: 18px;
+}
+
+.stack-md > * + * {
+  margin-top: 14px;
+}
+
+form.card,
+#resultSection,
+#adminSection {
+  padding: 24px;
+}
+
+label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+
+textarea,
+input[type="text"],
+input[type="password"],
+input[type="number"],
+input[type="url"],
+input[type="search"],
+select,
+input[readonly] {
+  width: 100%;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: rgba(15, 23, 42, 0.9);
+  color: var(--text);
+  padding: 14px 16px;
+  font-size: 0.96rem;
+  line-height: 1.6;
+  outline: none;
+}
+
+/* Retention days input while disabled (permanent storage selected):
+   dimmed box, number hidden but value preserved in the DOM. */
+#retentionDays:disabled,
+.ret-days:disabled {
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  background: rgba(15, 23, 42, 0.45);
+  border-color: rgba(148, 163, 184, 0.08);
+  cursor: not-allowed;
+}
+
+textarea:focus,
+input[type="text"]:focus,
+input[type="password"]:focus,
+input[type="number"]:focus,
+input[type="url"]:focus,
+input[type="search"]:focus,
+select:focus,
+input[readonly]:focus {
+  border-color: rgba(96, 165, 250, 0.72);
+  box-shadow: 0 0 0 4px rgba(96, 165, 250, 0.12);
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin-top: 8px;
+  line-height: 1.6;
+}
+
+/* Per-source test-fetch results are newline-joined; keep the breaks. */
+#ipSourceMsg {
+  white-space: pre-line;
+}
+
+.checkbox-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(15, 23, 42, 0.76);
+}
+
+.checkbox-wrap label {
+  margin: 0;
+  font-weight: 500;
+}
+
+.checkbox-wrap input {
+  width: 18px;
+  height: 18px;
+}
+
+.actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+button {
+  appearance: none;
+  border: none;
+  border-radius: 14px;
+  padding: 12px 18px;
+  font-size: 0.96rem;
+  font-weight: 700;
+  cursor: pointer;
+  background: linear-gradient(135deg, var(--accent), #2563eb);
+  color: white;
+  transition: transform 0.16s ease, opacity 0.16s ease;
+}
+
+button:hover {
+  transform: translateY(-1px);
+}
+
+button:disabled {
+  opacity: 0.66;
+  cursor: not-allowed;
+  transform: none;
+}
+
+button.secondary {
+  background: rgba(30, 41, 59, 0.92);
+  color: var(--text);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+button.small {
+  min-width: 74px;
+  padding: 12px 14px;
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* Collapsible panels (entry detail / retention / tags) slide their
+   height open and shut instead of snapping: the panel is a grid whose
+   single row animates between 0fr and 1fr while the inner wrapper
+   clips. Visibility flips with a delay so a closed panel's controls
+   leave the tab order only after it has finished collapsing. */
+.slide {
+  display: grid;
+  grid-template-rows: 0fr;
+  visibility: hidden;
+  transition: grid-template-rows 0.3s ease, visibility 0s 0.3s;
+}
+.slide.open {
+  grid-template-rows: 1fr;
+  visibility: visible;
+  transition: grid-template-rows 0.3s ease;
+}
+.slide > .slide-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .slide,
+  .slide.open {
+    transition: none;
+  }
+}
+
+.section-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: end;
+}
+
+.counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.counts span {
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(52, 211, 153, 0.12);
+  border: 1px solid rgba(52, 211, 153, 0.16);
+  color: #bbf7d0;
+  font-size: 0.92rem;
+}
+
+.warning {
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.18);
+  color: #fde68a;
+  line-height: 1.75;
+  white-space: pre-wrap;
+}
+
+.overwrite-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--warning);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+}
+
+.overwrite-banner[hidden] {
+  display: none;
+}
+
+.table-wrap {
+  overflow-x: auto;
+  border-radius: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+/* Node preview: ALL generated nodes are rendered, but the box keeps the
+   height it used to have at 20 rows (header + 20 x ~46px) and scrolls
+   internally; the header row sticks while scrolling. */
+.table-wrap.preview-scroll {
+  max-height: 968px;
+  overflow-y: auto;
+}
+.table-wrap.preview-scroll thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: rgb(30, 41, 59);
+}
+
+.table-wrap table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 720px;
+}
+
+.table-wrap th,
+.table-wrap td {
+  padding: 12px 14px;
+  text-align: left;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+  font-size: 0.92rem;
+}
+
+.table-wrap th {
+  color: #bfdbfe;
+  background: rgba(30, 41, 59, 0.68);
+}
+
+@media (max-width: 920px) {
+  .hero,
+  .two-col {
+    grid-template-columns: 1fr;
+  }
+
+  .section-head {
+    flex-direction: column;
+    align-items: start;
+  }
+}
+
+@media (max-width: 640px) {
+  .container {
+    width: min(100% - 20px, 1120px);
+    margin-top: 20px;
+    margin-bottom: 36px;
+  }
+
+  .card,
+  form.card,
+  #resultSection {
+    border-radius: 16px;
+  }
+
+  .hero,
+  form.card,
+  #resultSection,
+  #adminSection {
+    padding: 18px;
+  }
+
+  .stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .sub-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .sub-card-wide {
+    grid-column: auto;
+  }
+
+  .sub-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    align-items: stretch;
+  }
+
+  .sub-actions input {
+    grid-column: 1 / -1;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .sub-actions button {
+    width: 100%;
+    min-width: 0;
+    justify-self: stretch;
+  }
+
+  .sub-actions .small {
+    padding-left: 0;
+    padding-right: 0;
+    white-space: nowrap;
+  }
+}
+
+.empty-state {
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: rgba(59, 130, 246, 0.08);
+  border: 1px solid rgba(96, 165, 250, 0.14);
+  color: var(--muted);
+  line-height: 1.8;
+}
+
+#resultSection,
+#adminSection {
+  margin-top: 24px;
+}
+
+.section-desc {
+  margin-top: 8px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.stat-card {
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(120, 140, 180, 0.16);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.stat-label {
+  display: block;
+  color: var(--muted);
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.stat-card strong {
+  font-size: 28px;
+  line-height: 1;
+}
+
+.sub-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.sub-card {
+  padding: 18px;
+  border-radius: 20px;
+  border: 1px solid rgba(120, 140, 180, 0.16);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.sub-card-head {
+  margin-bottom: 14px;
+}
+
+.client-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.client-icon{
+  width:42px;
+  height:42px;
+  border-radius:14px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  background:rgba(59,130,246,.15);
+  border:1px solid rgba(96,165,250,.22);
+}
+
+.client-meta h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.client-meta p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.sub-actions {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.sub-actions input {
+  min-width: 0;
+}
+
+.preview-wrap {
+  margin-top: 8px;
+}
+
+.sub-card-wide {
+  grid-column: 1 / -1;
+}
+
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  /* The dialog is ~430px tall plus its top margin: on short or
+     landscape viewports it would otherwise overflow the fixed layer
+     and clip its tail (the subscription URL) with no way to scroll. */
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.modal.hidden {
+  display: none;
+}
+
+.modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(2, 6, 23, 0.7);
+  backdrop-filter: blur(6px);
+}
+
+.modal-dialog {
+  position: relative;
+  width: min(92vw, 420px);
+  margin: 8vh auto 0;
+  padding: 20px;
+  border-radius: 20px;
+  background: #0f172a;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+  z-index: 1;
+}
+
+.modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.modal-body {
+  display: grid;
+  gap: 14px;
+  justify-items: center;
+}
+
+.qr-box {
+  width: 240px;
+  min-height: 240px;
+  padding: 10px;
+  border-radius: 18px;
+  background: #fff;
+  display: grid;
+  place-items: center;
+}
+
+.qr-text {
+  word-break: break-all;
+  text-align: center;
+}
+
+.client-icon img{
+  width:22px;
+  height:22px;
+  display:block;
+}
+
+.hero-title-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.hero-title-row .hero-title {
+  margin-bottom: 0;
+}
+
+.hero-title {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.hero-logo {
+  width: 1em;
+  height: 1em;
+  flex: 0 0 auto;
+}
+
+@media (max-width: 640px) {
+  .hero-title {
+    gap: 10px;
+  }
+}
+#retentionDays:disabled::-webkit-outer-spin-button,
+#retentionDays:disabled::-webkit-inner-spin-button,
+.ret-days:disabled::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Keep the retention select and the days input exactly the same height:
+   number inputs honour line-height:1.6 from the shared input rule while
+   selects do not, which made the right box a few px taller. */
+#storageMode,
+#retentionDays {
+  height: 52px;
+  line-height: 1.2;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+/* Expanded per-entry link cards (same cards as the result section),
+   rendered as a detail block under the entry row. */
+.entry-detail > .slide-inner {
+  padding: 4px 14px 20px;
+}
+.entry-detail .sub-grid {
+  margin-bottom: 14px;
+}
+
+/* ---- Admin list: entries are blocks (header row + collapsible detail),
+   so an expanded entry's row can stick to the top while its links scroll. ---- */
+.admin-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+}
+.admin-toolbar label {
+  margin: 0;
+}
+.admin-toolbar select,
+.ret-controls select {
+  width: auto;
+  min-width: 230px;
+}
+/* Search box: visually the same size as the sort select — same width
+   class (no flex stretching) and an identical locked height. */
+.admin-toolbar select,
+.admin-toolbar input[type="search"] {
+  height: 55px;
+}
+.admin-toolbar input[type="search"] {
+  width: auto;
+  flex: 0 1 260px;
+  max-width: 260px;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.toolbar-spacer {
+  flex: 1;
+}
+
+.admin-head,
+.entry-row {
+  display: grid;
+  grid-template-columns: 36px minmax(170px, 1fr) 132px 100px minmax(110px, 1fr) 84px 216px;
+  gap: 14px;
+  align-items: center;
+}
+
+.admin-head {
+  padding: 12px 14px;
+  margin-top: 4px;
+  border-radius: 12px;
+  background: rgba(30, 41, 59, 0.68);
+  color: #bfdbfe;
+  font-size: 0.92rem;
+  text-align: center;
+}
+.admin-head span {
+  white-space: nowrap;
+}
+
+.entry {
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+}
+.table-wrap tr:last-child td,
+.entry:last-child {
+  border-bottom: none;
+}
+
+.entry-row {
+  padding: 18px 14px;
+  font-size: 0.92rem;
+}
+
+.entry-row .cell {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Created-time, validity and node-count columns read better centered,
+   like their headers (column 1 is the selection checkbox) */
+.entry-row .cell:nth-child(3),
+.entry-row .cell:nth-child(4),
+.entry-row .cell:nth-child(6) {
+  text-align: center;
+}
+
+/* Selection checkboxes (per-entry and the header select-all) */
+.entry-check,
+#selectAllEntries {
+  width: 20px;
+  height: 20px;
+  accent-color: #3b82f6;
+  cursor: pointer;
+}
+
+/* The sticky magic: while an entry is expanded, its row pins to the top of
+   the viewport so 收起 is always one tap away. When the next expanded entry
+   arrives, the previous row rides away with the end of its own block and
+   the new one takes its place (and vice versa scrolling up). */
+.entry.expanded .entry-row,
+.entry.retention-open .entry-row,
+.entry.tags-open .entry-row {
+  position: sticky;
+  top: 10px;
+  z-index: 30;
+  background: rgb(13, 21, 40);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 16px;
+  box-shadow: 0 16px 44px rgba(2, 6, 23, 0.5);
+}
+
+.admin-empty {
+  padding: 18px 14px;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.admin-more {
+  padding: 14px;
+  text-align: center;
+}
+
+/* ---- Header version status + update-check warning ---- */
+.version-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid rgba(148, 163, 184, 0.38);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.45);
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 600;
+  line-height: 1.35;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.version-status::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.version-status.is-current {
+  border-color: rgba(74, 222, 128, 0.45);
+  background: rgba(22, 163, 74, 0.12);
+  color: #86efac;
+}
+
+.version-status.is-update {
+  border-color: rgba(96, 165, 250, 0.68);
+  background: rgba(37, 99, 235, 0.2);
+  color: #bfdbfe;
+}
+
+.version-status.is-update:hover {
+  background: rgba(37, 99, 235, 0.3);
+  color: #dbeafe;
+}
+
+.version-status.is-stale {
+  border-color: rgba(245, 158, 11, 0.58);
+  background: rgba(245, 158, 11, 0.13);
+  color: #fcd34d;
+}
+
+.version-status.is-failed {
+  border-color: rgba(248, 113, 113, 0.62);
+  background: rgba(220, 38, 38, 0.14);
+  color: #fca5a5;
+}
+
+.version-alert {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid rgba(245, 158, 11, 0.58);
+  border-radius: 14px;
+  background: rgba(245, 158, 11, 0.13);
+  color: #fde68a;
+  line-height: 1.55;
+}
+
+.version-alert button {
+  flex: 0 0 auto;
+  min-height: 44px;
+}
+
+@media (max-width: 640px) {
+  .hero-title-row {
+    gap: 10px;
+  }
+
+  .version-status {
+    white-space: normal;
+  }
+
+  .version-alert {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
+/* ---- Quick dock: liquid-glass section nav above the back-to-top ---- */
+.quick-dock {
+  position: fixed;
+  right: 22px;
+  bottom: calc(22px + env(safe-area-inset-bottom, 0px));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  z-index: 900;
+}
+
+.quick-nav-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.quick-nav {
+  width: 56px;
+  min-width: 56px;
+  height: 48px;
+  min-height: 48px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #e2e8f0;
+  background:
+    linear-gradient(150deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.05) 55%, rgba(255, 255, 255, 0.02)),
+    rgba(15, 23, 42, 0.35);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  backdrop-filter: blur(14px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    inset 0 -10px 18px rgba(255, 255, 255, 0.05),
+    0 10px 26px rgba(2, 6, 23, 0.45);
+  transition: transform 0.16s ease, background 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease, color 0.25s ease;
+}
+
+.quick-nav:active {
+  transform: scale(0.93);
+}
+
+.quick-nav.active {
+  color: #ffffff;
+  background:
+    linear-gradient(150deg, rgba(96, 165, 250, 0.5), rgba(37, 99, 235, 0.38)),
+    rgba(15, 23, 42, 0.35);
+  border-color: rgba(147, 197, 253, 0.6);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    inset 0 -10px 18px rgba(255, 255, 255, 0.06),
+    0 10px 26px rgba(37, 99, 235, 0.4);
+}
+
+#generator-form,
+#resultSection,
+#adminSection {
+  scroll-margin-top: 14px;
+}
+
+/* ---- Back-to-top round button (sits in the quick dock; its hidden
+   state keeps the slot via visibility, so the dock never jumps) ---- */
+.page-diag {
+  max-width: 960px;
+  margin: 8px auto 28px;
+  padding: 0 16px;
+  text-align: center;
+}
+.page-diag .hint {
+  margin-top: 8px;
+}
+.back-top {
+  width: 52px;
+  height: 52px;
+  min-height: 52px;
+  padding: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, var(--accent), #2563eb);
+  box-shadow: 0 14px 34px rgba(2, 6, 23, 0.5);
+  z-index: 900;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(10px);
+  transition: opacity 0.25s ease, transform 0.25s ease, visibility 0.25s;
+}
+.back-top.show {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+}
+
+@media (max-width: 920px) {
+  /* Narrow screens: the admin list scrolls sideways instead, and the
+     sticky entry row steps aside (sticky cannot work inside the
+     horizontal scroller). */
+  .admin-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .admin-head,
+  .entry {
+    /* Must cover the row grid's own minimum, or the last (actions)
+       column spills past every row box and iOS Safari clips it
+       instead of extending the scroll area: tracks 848 + gaps 84 +
+       row padding 28 = 960. (Was 936 — buttons overflowed the row
+       edge by ~24px on phones.) */
+    min-width: 960px;
+  }
+  .entry.expanded .entry-row,
+  .entry.retention-open .entry-row,
+  .entry.tags-open .entry-row {
+    position: static;
+    box-shadow: none;
+  }
+}
+
+.admin-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 10px; /* row gap 12px, column gap 10px */
+  width: 100%;
+}
+.admin-actions > a {
+  display: block;
+}
+.admin-actions button {
+  width: 100%;
+  font-size: 0.92rem; /* a little headroom so the longest label never crowds its cell */
+}
+.admin-actions [data-admin-action="retention"] {
+  white-space: nowrap;
+  padding-left: 8px;
+  padding-right: 8px;
+}
+.admin-actions .span-all {
+  grid-column: 1 / -1;
+}
+
+/* Note editor: a tall multi-line box. Long notes wrap, and overflow scrolls
+   inside the box (mouse wheel / dragged scrollbar / touch swipe). The box
+   stretches to the full entry-row height (driven by the actions column),
+   so it grows/shrinks with the buttons instead of a fixed pixel height. */
+.entry-row .cell:nth-child(2) {
+  align-self: stretch;
+}
+#adminSection .note-input {
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  min-height: 98px;
+  padding: 10px 12px;
+  font-size: 0.92rem;
+  line-height: 1.55;
+  overflow-y: auto;
+  resize: vertical;
+  word-break: break-all;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ---- Touch friendliness (whole page) ---- */
+html {
+  -webkit-tap-highlight-color: rgba(96, 165, 250, 0.12);
+}
+
+button,
+a,
+input,
+select,
+textarea,
+label {
+  touch-action: manipulation; /* no double-tap zoom delay on controls */
+}
+
+@media (pointer: coarse) {
+  /* Apple HIG / Material: touch targets at least ~44-48px, gaps >= 8px */
+  button,
+  button.small {
+    min-height: 48px;
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .admin-actions {
+    gap: 14px 12px;
+  }
+  /* Keep the longest action label on one line without shrinking the
+     48px touch height: trade horizontal padding, not vertical room. */
+  .admin-actions [data-admin-action="retention"] {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+
+  .sub-actions {
+    gap: 12px;
+  }
+
+  .actions {
+    gap: 14px;
+  }
+
+  /* 16px form text stops iOS Safari from auto-zooming on focus */
+  input[type="text"],
+  input[type="password"],
+  input[type="number"],
+  input[type="url"],
+  input[type="search"],
+  select,
+  input[readonly],
+  textarea {
+    font-size: 16px;
+  }
+
+  .checkbox-wrap {
+    min-height: 52px;
+  }
+
+  .checkbox-wrap input,
+  .entry-check,
+  #selectAllEntries {
+    width: 24px;
+    height: 24px;
+  }
+
+  .table-wrap th,
+  .table-wrap td {
+    padding-top: 16px;
+    padding-bottom: 16px;
+  }
+
+  /* Taller touch rows: the preview cap grows to match 20 of them. */
+  .table-wrap.preview-scroll {
+    max-height: 1134px;
+  }
+
+  #adminSection .note-input {
+    font-size: 16px;
+    height: 100%;
+    min-height: 112px;
+  }
+}
+
+/* Save feedback states on panel save buttons */
+#adminSection button[data-save-state="ok"] {
+  border-color: rgba(52, 211, 153, 0.65);
+  color: #6ee7b7;
+}
+#adminSection button[data-save-state="fail"] {
+  border-color: rgba(248, 113, 113, 0.65);
+  color: #fca5a5;
+}
+
+/* Note autosave: the cell is a vertical stack (editor, one reserved
+   status line, tag chips) so a status appearing never shifts the row. */
+.entry-row .note-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+#adminSection .note-cell .note-input {
+  flex: 1 1 0;
+  height: auto;
+  min-height: 3.2em; /* floor for short rows / stacked mobile layout */
+  resize: none; /* the 50/50 split sizes the box; manual resize would break it */
+}
+/* The tag area under the editor takes the other half of the cell. */
+.entry-row .note-cell .entry-tags {
+  flex: 1 1 0;
+  margin-top: 0;
+  align-content: flex-start;
+}
+.note-save-status {
+  min-height: 1.35em;
+  font-size: 0.82rem;
+  line-height: 1.35;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+  transition: opacity 0.18s ease, color 0.18s ease;
+}
+.note-save-status.is-visible {
+  opacity: 1;
+}
+.note-save-status[data-state="ok"] {
+  color: #6ee7b7;
+}
+.note-save-status[data-state="warn"] {
+  color: #fbbf24;
+}
+.note-save-status[data-state="fail"] {
+  color: #fca5a5;
+  white-space: normal;
+}
+
+/* ---- Inline retention edit panel ---- */
+.entry-retention > .slide-inner {
+  padding: 2px 14px 18px;
+}
+
+/* Entry tags: chips in the picker, the rows, the filter bar and the
+   inline editor all share one flat-solid look (owner's pick, scheme D:
+   borderless filled blocks, small radius, no outline). */
+.tag-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border: none;
+  border-radius: 8px;
+  background: rgba(148, 163, 184, 0.16);
+  color: var(--text);
+  font-size: 0.85rem;
+  font-weight: 550;
+  line-height: 1.5;
+  min-height: 32px;
+}
+button.tag-chip {
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.85rem;
+}
+button.tag-chip:hover {
+  background: rgba(148, 163, 184, 0.27);
+}
+.tag-chip.is-on {
+  background: var(--accent);
+  color: #0b1220;
+  font-weight: 600;
+}
+button.tag-chip.is-on:hover {
+  background: var(--accent);
+}
+/* Node-name format chips: a hidden component loses its fill and
+   dims; the eye stays a plain inner button (tap, never a drag). */
+#nameFormatChips .tag-chip.is-off {
+  opacity: 0.38;
+  background: transparent;
+}
+.nf-eye {
+  border: none;
+  background: none;
+  padding: 0 2px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.85rem;
+  line-height: 1;
+  color: inherit;
+}
+/* Editable chips (generate picker, tag-edit panel, filter bar)
+   reorder by long-press drag; row display chips stay plain taps. */
+#genTagChips .tag-chip,
+.tags-edit-chips .tag-chip,
+#tagFilterChips .tag-chip,
+#nameFormatChips .tag-chip {
+  touch-action: none;
+  cursor: grab;
+  -webkit-user-select: none;
+  user-select: none;
+}
+/* While dragging, the chip leaves the flow and follows the pointer
+   (left/top set inline); a dashed placeholder holds its slot, and
+   siblings glide via FLIP transforms — no layout feedback, no jitter. */
+.tag-chip.dragging {
+  opacity: 0.97;
+  scale: 1.06;
+  background: rgba(96, 165, 250, 0.3);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.5);
+  cursor: grabbing;
+  margin: 0;
+}
+.chip-placeholder {
+  display: inline-block;
+  box-sizing: border-box;
+  border: 1.5px dashed rgba(96, 165, 250, 0.55);
+  border-radius: 8px;
+  background: rgba(96, 165, 250, 0.07);
+}
+/* Filter-bar trash zone: the label turns into a bin during a drag. */
+.tag-filter-label.trash-armed {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 36px;
+  padding: 2px 10px;
+  border: 1.5px dashed rgba(248, 113, 113, 0.6);
+  border-radius: 10px;
+  font-size: 1.05rem;
+}
+.tag-filter-label.trash-armed.is-hot {
+  background: rgba(248, 113, 113, 0.22);
+  border-color: #f87171;
+  scale: 1.12;
+}
+.tag-chip-x {
+  border: none;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 2px 4px;
+  min-height: 24px;
+  min-width: 24px;
+}
+.tag-chip-x:hover {
+  color: var(--danger);
+}
+.tag-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+#genTagChips {
+  margin-bottom: 8px;
+}
+#genTagChips:empty {
+  margin-bottom: 0;
+}
+.entry-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.tag-chip-mini {
+  min-height: 28px;
+  padding: 2px 8px;
+  font-size: 0.8rem;
+}
+.tag-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0 14px;
+}
+.tag-filter-label {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.tag-mode-toggle {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.tag-mode-btn {
+  border: none;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 6px 12px;
+  min-height: 32px;
+}
+.tag-mode-btn.is-active {
+  background: var(--accent);
+  color: #0b1220;
+  font-weight: 600;
+}
+.entry-tags-panel > .slide-inner {
+  padding: 2px 14px 18px;
+}
+.entry-tags-panel .tags-edit-chips {
+  margin-bottom: 12px;
+}
+.entry-tags-panel .tags-edit-input {
+  flex: 1 1 200px;
+}
+.entry-tags-panel .hint {
+  margin-top: 10px;
+}
+.ret-current {
+  margin-bottom: 12px;
+  font-size: 0.95rem;
+}
+.ret-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+}
+.ret-controls label {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ret-controls .ret-days {
+  width: 110px;
+}
+.entry-retention .hint {
+  margin-top: 10px;
+}
+
+/* ---- Wide screens: workbench layout (scheme A) ----
+   From 1200px up the page widens and the generator and the result
+   sit side by side, same screen; narrower layouts are unchanged. */
+@media (min-width: 1200px) {
+  .container {
+    width: min(1400px, calc(100% - 32px));
+  }
+  .workbench {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+  }
+  .page-diag {
+    max-width: 1400px;
+  }
+}
+
+
+/* ============ PREVIEW-ONLY (picker + grip + themes) ============ */
+.picker { position: fixed; top: 0; left: 0; right: 0; z-index: 999; display: flex; gap: 8px; align-items: center;
+  padding: 10px 14px; background: #f5f5f4; color: #1c1917; border-bottom: 2px solid #1c1917;
+  font-family: ui-sans-serif, system-ui, sans-serif; font-size: 14px; }
+.picker strong { margin-right: 4px; }
+.picker button { background: #fff; color: #1c1917; border: 1.5px solid #1c1917; border-radius: 999px;
+  padding: 6px 14px; font-size: 14px; font-weight: 600; cursor: pointer; min-height: 36px; }
+.picker button[aria-pressed="true"] { background: #1c1917; color: #fff; }
+.picker .pk-note { margin-left: auto; color: #57534e; font-size: 12.5px; }
+body { padding-top: 54px; }
+.chip-grip { display: inline-flex; align-items: center; color: var(--muted); opacity: .75;
+  padding: 3px 2px 3px 0; margin-left: -5px; cursor: grab; touch-action: none; flex: none; }
+.chip-grip:active { cursor: grabbing; }
+.chip-grip svg { display: block; }
+#genTagChips .tag-chip, .tags-edit-chips .tag-chip, #tagFilterChips .tag-chip, #nameFormatChips .tag-chip { cursor: default; }
+
+/* ---- Variant: graphite ---- */
+html[data-theme="graphite"] { color-scheme: dark;
+  --bg: #101114; --card: #17181d; --line: rgba(255,255,255,.09); --text: #edeff2; --muted: #9ba1a9;
+  --accent: #a3b8dc; --accent-2: #7fc98f; --warning: #e0a83e; --danger: #e57373;
+  --shadow: 0 10px 30px rgba(0,0,0,.35); }
+html[data-theme="graphite"] body::before { background: linear-gradient(180deg, #121317 0%, #101114 100%); }
+html[data-theme="graphite"] .card { backdrop-filter: none; border-radius: 14px; }
+html[data-theme="graphite"] textarea, html[data-theme="graphite"] input[type="text"],
+html[data-theme="graphite"] input[type="password"], html[data-theme="graphite"] input[type="number"],
+html[data-theme="graphite"] input[type="url"], html[data-theme="graphite"] input[type="search"],
+html[data-theme="graphite"] select, html[data-theme="graphite"] input[readonly] { background: #101114; }
+html[data-theme="graphite"] button:not(.secondary):not(.danger):not(.tag-chip) { background: #a3b8dc; color: #10131a; }
+html[data-theme="graphite"] .tag-chip { background: rgba(255,255,255,.07); }
+html[data-theme="graphite"] .tag-chip.is-on { background: #a3b8dc; color: #10131a; }
+
+/* ---- Variant: paper ---- */
+html[data-theme="paper"] { color-scheme: light;
+  --bg: #f3f1ec; --card: #fffefa; --line: rgba(29,39,51,.13); --text: #1d2733; --muted: #5f6d7d;
+  --accent: #1f5fd6; --accent-2: #178a4c; --warning: #b45309; --danger: #dc2626;
+  --shadow: 0 12px 32px rgba(29,39,51,.10); }
+html[data-theme="paper"] body { background-color: #f3f1ec; }
+html[data-theme="paper"] body::before { background: linear-gradient(180deg, #f8f6f1 0%, #efede7 100%); }
+html[data-theme="paper"] .card { backdrop-filter: none; }
+html[data-theme="paper"] textarea, html[data-theme="paper"] input[type="text"],
+html[data-theme="paper"] input[type="password"], html[data-theme="paper"] input[type="number"],
+html[data-theme="paper"] input[type="url"], html[data-theme="paper"] input[type="search"],
+html[data-theme="paper"] select, html[data-theme="paper"] input[readonly] { background: #ffffff; color: #1d2733; border-color: rgba(29,39,51,.18); }
+html[data-theme="paper"] .tag-chip { background: rgba(29,39,51,.07); color: #1d2733; }
+html[data-theme="paper"] .tag-chip.is-on { background: #1f5fd6; color: #fff; }
+html[data-theme="paper"] .table-wrap th { color: #33507e; background: #eef2f7; }
+html[data-theme="paper"] .table-wrap td { border-bottom-color: rgba(29,39,51,.08); }
+html[data-theme="paper"] .version-status.is-ok { color: #146c2e; background: rgba(23,138,76,.10); border-color: rgba(23,138,76,.25); }
+html[data-theme="paper"] .hero-note { background: rgba(31,95,214,.06); border-color: rgba(31,95,214,.16); }
+html[data-theme="paper"] .quick-nav { background: rgba(255,254,250,.92); color: #1d2733; border-color: rgba(29,39,51,.15); }
+
+/* ---- Variant: glass (current identity, refined) ---- */
+html[data-theme="glass"] .card { border-radius: 16px; }
+html[data-theme="glass"] body::before { background:
+  radial-gradient(circle at top right, rgba(52,211,153,.09), transparent 30%),
+  radial-gradient(circle at top left, rgba(96,165,250,.14), transparent 26%),
+  linear-gradient(180deg, #08101e 0%, #0b1220 100%); }
+</style></head>
+  <body>
+<div class="picker" role="group" aria-label="预览变体切换">
+  <strong>全站重绘预览</strong>
+  <button type="button" data-v="graphite">石墨</button>
+  <button type="button" data-v="paper">纸面</button>
+  <button type="button" data-v="glass">深蓝玻璃·精修</button>
+  <span class="pk-note">真实页面结构＋真实数据 · 按 1 / 2 / 3 也可切换 · 芯片左端六点为拖柄（只有它变抓握手）</span>
+</div>
+<script>
+  const root = document.documentElement;
+  const btns = [...document.querySelectorAll('.picker button')];
+  function setV(v) { root.dataset.theme = v; btns.forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v === v)));
+    const u = new URL(location); u.searchParams.set('__variant', v); history.replaceState(null, '', u); }
+  btns.forEach(b => b.addEventListener('click', () => setV(b.dataset.v)));
+  addEventListener('keydown', (e) => { const m = { 1: 'graphite', 2: 'paper', 3: 'glass' }[e.key]; if (m) setV(m); });
+  setV(new URL(location).searchParams.get('__variant') || 'graphite');
+</script>
+
+    <main class="container">
+      <section class="hero card">
+        <div>
+          <p class="eyebrow">InfiCheesy &amp; YouTube &amp; GitHub</p>
+
+          <div class="hero-title-row">
+            <h1 class="hero-title">
+              <img src="data:image/svg+xml;base64,PHN2ZyBjbGlwLXJ1bGU9ImV2ZW5vZGQiIGZpbGwtcnVsZT0iZXZlbm9kZCIgaGVpZ2h0PSI1MTIiIHN0cm9rZS1saW5lam9pbj0icm91bmQiIHN0cm9rZS1taXRlcmxpbWl0PSIyIiB2aWV3Qm94PSIwIDAgNDggNDgiIHdpZHRoPSI1MTIiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgeG1sbnM6eGxpbms9Imh0dHA6Ly93d3cudzMub3JnLzE5OTkveGxpbmsiPjxsaW5lYXJHcmFkaWVudCBpZD0iX0xpbmVhcjEiIGdyYWRpZW50VHJhbnNmb3JtPSJtYXRyaXgoMjggLTI5IDI5IDI4IDEyNzkuNTcgMTMxLjc4NSkiIGdyYWRpZW50VW5pdHM9InVzZXJTcGFjZU9uVXNlIiB4MT0iMCIgeDI9IjEiIHkxPSIwIiB5Mj0iMCI+PHN0b3Agb2Zmc2V0PSIwIiBzdG9wLWNvbG9yPSIjMDA1NmUwIi8+PHN0b3Agb2Zmc2V0PSIuMDEiIHN0b3AtY29sb3I9IiMwMDU2ZTAiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiMwMGU1YjgiLz48L2xpbmVhckdyYWRpZW50PjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKC0xNTkgLTUzKSI+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoLTExMDkuNTcgLTQwLjc4NSkiPjxnIGlkPSJuZ2ljb24iPjxwYXRoIGQ9Im0xMjgxLjU5IDExMi40OTVzLTIuMDUgMi4wNTUtNC4zNSA0LjM1NmMtMi4xMyAyLjEyMy0zLjMyIDUuMDAzLTMuMzIgOC4wMDYgMCAzLjAwMiAxLjE5IDUuODgyIDMuMzIgOC4wMDUuMDguMDg0LjE2LjE2OC4yNS4yNTIgMi4xMiAyLjEyMyA1IDMuMzE2IDggMy4zMTYgMy4wMSAwIDUuODktMS4xOTMgOC4wMS0zLjMxNiAyLjMtMi4zIDQuMzYtNC4zNTYgNC4zNi00LjM1Ni45Ny0uOTc1Ljk3LTIuNTYgMC0zLjUzNS0uOTgtLjk3Ni0yLjU2LS45NzYtMy41NCAwIDAgMC0yLjA2IDIuMDU1LTQuMzYgNC4zNTYtMS4xOCAxLjE4NS0yLjc5IDEuODUxLTQuNDcgMS44NTEtMS42NyAwLTMuMjgtLjY2Ni00LjQ3LTEuODUxbC0uMjUtLjI1MmMtMS4xOC0xLjE4Ni0xLjg1LTIuNzk0LTEuODUtNC40NyAwLTEuNjc3LjY3LTMuMjg1IDEuODUtNC40NzEgMi4zLTIuMyA0LjM2LTQuMzU2IDQuMzYtNC4zNTYuOTctLjk3NS45Ny0yLjU1OSAwLTMuNTM1LS45OC0uOTc2LTIuNTYtLjk3Ni0zLjU0IDB6bTE0Ljg4LTIuMTQ4LTExLjM0IDExLjM0Yy0uOTguOTc2LS45OCAyLjU2IDAgMy41MzYuOTcuOTc1IDIuNTYuOTc1IDMuNTMgMGwxMS4zNC0xMS4zNDFjLjk4LS45NzYuOTgtMi41NiAwLTMuNTM1LS45Ny0uOTc2LTIuNTYtLjk3Ni0zLjUzIDB6bTcuMDQgMTIuNzUzczIuMDctMi4wNjkgNC4zOC00LjM4YzIuMTMtMi4xMjMgMy4zMi01LjAwMyAzLjMyLTguMDA2IDAtMy4wMDItMS4xOS01Ljg4Mi0zLjMyLTguMDA1LS4wOC0uMDg0LS4xNi0uMTY4LS4yNS0uMjUyLTIuMTItMi4xMjQtNS0zLjMxNi04LTMuMzE2LTMuMDEgMC01Ljg5IDEuMTkyLTguMDEgMy4zMTYtMi4zIDIuMjk5LTQuMzUgNC4zNTQtNC4zNSA0LjM1NC0uOTguOTc2LS45OCAyLjU2IDAgMy41MzYuOTcuOTc1IDIuNTYuOTc1IDMuNTMgMCAwIDAgMi4wNi0yLjA1NSA0LjM2LTQuMzU1IDEuMTgtMS4xODUgMi43OS0xLjg1MSA0LjQ3LTEuODUxIDEuNjcgMCAzLjI4LjY2NiA0LjQ3IDEuODUxbC4yNS4yNTJjMS4xOCAxLjE4NiAxLjg1IDIuNzk0IDEuODUgNC40NyAwIDEuNjc3LS42NyAzLjI4NS0xLjg1IDQuNDcxLTIuMzEgMi4zMTEtNC4zOCA0LjM3OS00LjM4IDQuMzc5LS45OC45NzYtLjk4IDIuNTYgMCAzLjUzNi45Ny45NzUgMi41Ni45NzUgMy41MyAweiIgZmlsbD0idXJsKCNfTGluZWFyMSkiLz48L2c+PC9nPjwvZz48L3N2Zz4=" alt="logo" class="hero-logo" />
+              <span>优选IP订阅生成器</span>
+            </h1>
+            <span id="versionStatus" class="version-status is-ok" role="status" aria-live="polite">v1.9.1 · 已是最新</span>
+            <a id="versionUpdateLink" class="version-status is-update hidden" href="#" target="_blank" rel="noopener">发现新版本</a>
+          </div>
+          <p class="lead">
+            只做三件事：导入自建节点、批量替换为优选 IP、输出可导入主流客户端的订阅链接。
+          </p>
+          <div id="versionAlert" class="version-alert hidden" role="alert">
+            <span id="versionAlertText"></span>
+            <button id="versionRetryBtn" type="button" class="secondary small">重新检查</button>
+          </div>
+        </div>
+        <div class="hero-note">
+          <strong>适合场景</strong>
+          <p>3X-UI / Xray / VPS 自建节点 + 你自己找好的 Cloudflare 优选 IP。</p>
+        </div>
+      </section>
+
+      <div class="workbench">
+        <form id="generator-form" class="card stack-lg">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">生成</p>
+              <h2>生成订阅</h2>
+              <p class="section-desc">粘贴节点链接、填好优选 IP / 域名，生成你的专属订阅。</p>
+            </div>
+          </div>
+
+          <div>
+            <label for="nodeLinks">1. 粘贴节点链接</label>
+            <textarea
+              id="nodeLinks"
+              name="nodeLinks"
+              rows="10"
+              placeholder="支持 vmess://、vless://、trojan://，一行一个。也支持直接粘贴原始 base64 订阅内容。"
+              required
+            ></textarea>
+            <p class="hint">重点兼容自建 VMess / VLESS / Trojan 的 WS + TLS 常见写法。</p>
+          </div>
+
+          <div>
+            <label for="preferredIps">2. 优选 IP / 优选域名来源（可混写）</label>
+            <textarea
+              id="preferredIps"
+              name="preferredIps"
+              rows="8"
+              placeholder="示例：
+104.16.1.2#HK-01
+104.17.2.3:2053#HK-02
+cf.example.com:443#US-Edge
+2606:4700::1#IPv6
+https://example.com/ips.txt"
+              required
+            ></textarea>
+            <p class="hint">
+              一行一个，两种写法可混写、按填写顺序合并：直接写 <code>IP</code>、<code>IP:端口</code>、<code>域名</code>、<code>域名:端口</code>（<code>#</code> 后面可写备注；IPv6 可填裸地址 <code>2606:4700::1</code>，或带端口的方括号写法 <code>[2606:4700::1]:443</code>）；
+              或写一行 <code>https://</code> 链接（最多 5 个），生成时会拉取该链接的优选列表（一行一个，也支持 CSV 测速结果和 JSON 列表）并合并进来。
+              框里只要含链接，这条订阅就是动态的：手写行固定不变，链接部分约每小时跟随来源更新，来源暂时不可用时自动使用上次的快照，订阅不会中断。
+            </p>
+            <div class="grid two-col compact">
+              <div>
+                <label for="ipSourceLimit">每个链接最多取前几个</label>
+                <input id="ipSourceLimit" name="ipSourceLimit" type="number" min="1" max="100" step="1" value="10" />
+              </div>
+              <div>
+                <label>&nbsp;</label>
+                <button id="testIpSourceBtn" type="button" class="secondary">测试拉取链接</button>
+              </div>
+            </div>
+            <p class="hint" id="ipSourceMsg"></p>
+          </div>
+
+          <div class="grid two-col compact">
+            <div>
+              <label for="namePrefix">3. 批量备注（可选）</label>
+              <input id="namePrefix" name="namePrefix" type="text" maxlength="100" placeholder="例如 CF" />
+            </div>
+            <div class="checkbox-wrap">
+              <input id="keepOriginalHost" name="keepOriginalHost" type="checkbox" checked />
+              <label for="keepOriginalHost">保留原节点 Host / SNI（推荐）</label>
+            </div>
+          </div>
+
+          <div>
+            <label>节点名格式（长按拖动排序，点眼睛显示 / 隐藏）</label>
+            <div id="nameFormatChips" class="tag-chips"><span class="tag-chip nf-chip"><span class="chip-grip" aria-hidden="true"><svg width="9" height="15" viewBox="0 0 10 16" fill="currentColor"><circle cx="2.5" cy="3" r="1.4"/><circle cx="7.5" cy="3" r="1.4"/><circle cx="2.5" cy="8" r="1.4"/><circle cx="7.5" cy="8" r="1.4"/><circle cx="2.5" cy="13" r="1.4"/><circle cx="7.5" cy="13" r="1.4"/></svg></span><span>原始名称</span><button type="button" class="nf-eye" aria-label="切换可见">👁</button></span><span class="tag-chip nf-chip"><span class="chip-grip" aria-hidden="true"><svg width="9" height="15" viewBox="0 0 10 16" fill="currentColor"><circle cx="2.5" cy="3" r="1.4"/><circle cx="7.5" cy="3" r="1.4"/><circle cx="2.5" cy="8" r="1.4"/><circle cx="7.5" cy="8" r="1.4"/><circle cx="2.5" cy="13" r="1.4"/><circle cx="7.5" cy="13" r="1.4"/></svg></span><span>批量备注</span><button type="button" class="nf-eye" aria-label="切换可见">👁</button></span><span class="tag-chip nf-chip"><span class="chip-grip" aria-hidden="true"><svg width="9" height="15" viewBox="0 0 10 16" fill="currentColor"><circle cx="2.5" cy="3" r="1.4"/><circle cx="7.5" cy="3" r="1.4"/><circle cx="2.5" cy="8" r="1.4"/><circle cx="7.5" cy="8" r="1.4"/><circle cx="2.5" cy="13" r="1.4"/><circle cx="7.5" cy="13" r="1.4"/></svg></span><span>优选地址</span><button type="button" class="nf-eye" aria-label="切换可见">👁</button></span><span class="tag-chip nf-chip is-off"><span class="chip-grip" aria-hidden="true"><svg width="9" height="15" viewBox="0 0 10 16" fill="currentColor"><circle cx="2.5" cy="3" r="1.4"/><circle cx="7.5" cy="3" r="1.4"/><circle cx="2.5" cy="8" r="1.4"/><circle cx="7.5" cy="8" r="1.4"/><circle cx="2.5" cy="13" r="1.4"/><circle cx="7.5" cy="13" r="1.4"/></svg></span><span>端点备注</span><button type="button" class="nf-eye" aria-label="切换可见">👁</button></span></div>
+            <p class="hint">
+              节点名由这四段拼成，分隔符是「 | 」：「批量备注」就是上面第 3 步填的内容；「端点备注」是优选地址每行
+              <code>#</code> 后面的文字（动态来源名单里写的也会采纳），没有备注时自动用序号。动态订阅每次刷新都会按当前格式重新拼名，优选地址会跟着换成最新拉到的。
+            </p>
+            <p class="hint" id="nameFormatExample">示例：美国31-v6单栈-极速 | HK-01 | 104.16.8.8</p>
+          </div>
+
+          <div>
+            <label for="subNote">条目备注（可选，不会出现在节点名里）</label>
+            <input id="subNote" name="subNote" type="text" maxlength="80" placeholder="例如：搬瓦工 DC6 / RackNerd 法兰克福" />
+            <p class="hint">
+              这条订阅是哪台 VPS 的就写哪台。它会和条目一起存进 KV，还会在 KV 里生成一个
+              <code>note:备注:编号</code> 的索引键，在 Cloudflare 后台的 KV 列表里一眼就能认出是哪台机器。
+            </p>
+          </div>
+
+          <div>
+            <label for="tagInput">条目标签（可选，可多选）</label>
+            <div id="genTagChips" class="tag-chips"><span class="tag-chip"><span class="chip-grip" aria-hidden="true"><svg width="9" height="15" viewBox="0 0 10 16" fill="currentColor"><circle cx="2.5" cy="3" r="1.4"/><circle cx="7.5" cy="3" r="1.4"/><circle cx="2.5" cy="8" r="1.4"/><circle cx="7.5" cy="8" r="1.4"/><circle cx="2.5" cy="13" r="1.4"/><circle cx="7.5" cy="13" r="1.4"/></svg></span><span>主力</span></span><span class="tag-chip"><span class="chip-grip" aria-hidden="true"><svg width="9" height="15" viewBox="0 0 10 16" fill="currentColor"><circle cx="2.5" cy="3" r="1.4"/><circle cx="7.5" cy="3" r="1.4"/><circle cx="2.5" cy="8" r="1.4"/><circle cx="7.5" cy="8" r="1.4"/><circle cx="2.5" cy="13" r="1.4"/><circle cx="7.5" cy="13" r="1.4"/></svg></span><span>备用</span></span></div>
+            <input id="tagInput" name="tagInput" type="text" placeholder="输入新标签，按回车添加" autocomplete="off" />
+            <div id="genTagSuggestions" class="tag-suggestions"></div>
+            <p class="hint">
+              给这条订阅打标签（如「香港」「主力」），方便在下方管理区按标签筛选：点下方已有标签选用，或输入新标签回车新建，每条最多 10 个；长按标签可拖动排序。
+              重新生成已有条目时，没动过这里就不会改动它的标签；选了标签（哪怕清空）则按这里的为准。
+            </p>
+          </div>
+
+          <div>
+            <label>存储期限</label>
+            <div class="grid two-col compact">
+              <select id="storageMode" name="storageMode">
+                <option value="permanent" selected>永久保存（手动删除为止）</option>
+                <option value="days">自定义天数后自动删除</option>
+              </select>
+              <input id="retentionDays" name="retentionDays" type="number" min="1" max="3650" step="1" value="30" disabled />
+            </div>
+            <p class="hint">
+              选“自定义天数”并填天数（1–3650）时，这条订阅会在到期后被 KV 自动删除，链接随之失效；
+              选“永久保存”则一直保留，直到在下方“KV 条目管理”里手动删除。同一内容重复生成时，以这次的选择为准并重新计时。
+            </p>
+          </div>
+
+          <div id="overwriteBanner" class="overwrite-banner" hidden>
+            <span>正在覆盖：<strong id="overwriteLabel"></strong>（点「生成订阅」将直接更新这条订阅，链接不变）</span>
+            <button id="overwriteCancel" type="button" class="secondary small">取消覆盖</button>
+          </div>
+
+          <div class="actions">
+            <button id="submitBtn" type="submit">生成订阅</button>
+            <button id="fillDemoBtn" type="button" class="secondary">填入演示数据</button>
+          </div>
+        </form>
+
+      <section id="resultSection" class="card stack-lg">
+        <div class="section-head result-head">
+          <div>
+            <p class="eyebrow">结果</p>
+            <h2>订阅结果</h2>
+            <p class="section-desc">选择适合你的客户端格式，复制订阅链接或扫码导入。</p>
+          </div>
+        </div>
+
+        <div id="warningBox" class="warning hidden"></div>
+
+        <div id="emptyState" class="empty-state" style="display:none">
+          还没有生成订阅。请先填写节点链接和优选 IP，然后点击“生成订阅”。
+        </div>
+
+        <div id="statsGrid" class="stats-grid">
+          <div class="stat-card">
+            <span class="stat-label">原始节点</span>
+            <strong id="statInputNodes">45</strong>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">优选地址</span>
+            <strong id="statEndpoints">2</strong>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">生成节点</span>
+            <strong id="statOutputNodes">90</strong>
+          </div>
+        </div>
+
+        <div class="sub-grid">
+          <article class="sub-card">
+            <div class="sub-card-head">
+              <div class="client-meta">
+                <div class="client-icon">
+                  <img src="data:image/svg+xml;base64,PHN2ZyBjbGlwLXJ1bGU9ImV2ZW5vZGQiIGZpbGwtcnVsZT0iZXZlbm9kZCIgaGVpZ2h0PSI1MTIiIHN0cm9rZS1saW5lam9pbj0icm91bmQiIHN0cm9rZS1taXRlcmxpbWl0PSIyIiB2aWV3Qm94PSIwIDAgNDggNDgiIHdpZHRoPSI1MTIiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgeG1sbnM6eGxpbms9Imh0dHA6Ly93d3cudzMub3JnLzE5OTkveGxpbmsiPjxsaW5lYXJHcmFkaWVudCBpZD0iX0xpbmVhcjEiIGdyYWRpZW50VHJhbnNmb3JtPSJtYXRyaXgoMjggLTI5IDI5IDI4IDEyNzkuNTcgMTMxLjc4NSkiIGdyYWRpZW50VW5pdHM9InVzZXJTcGFjZU9uVXNlIiB4MT0iMCIgeDI9IjEiIHkxPSIwIiB5Mj0iMCI+PHN0b3Agb2Zmc2V0PSIwIiBzdG9wLWNvbG9yPSIjMDA1NmUwIi8+PHN0b3Agb2Zmc2V0PSIuMDEiIHN0b3AtY29sb3I9IiMwMDU2ZTAiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiMwMGU1YjgiLz48L2xpbmVhckdyYWRpZW50PjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKC0xNTkgLTUzKSI+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoLTExMDkuNTcgLTQwLjc4NSkiPjxnIGlkPSJuZ2ljb24iPjxwYXRoIGQ9Im0xMjgxLjU5IDExMi40OTVzLTIuMDUgMi4wNTUtNC4zNSA0LjM1NmMtMi4xMyAyLjEyMy0zLjMyIDUuMDAzLTMuMzIgOC4wMDYgMCAzLjAwMiAxLjE5IDUuODgyIDMuMzIgOC4wMDUuMDguMDg0LjE2LjE2OC4yNS4yNTIgMi4xMiAyLjEyMyA1IDMuMzE2IDggMy4zMTYgMy4wMSAwIDUuODktMS4xOTMgOC4wMS0zLjMxNiAyLjMtMi4zIDQuMzYtNC4zNTYgNC4zNi00LjM1Ni45Ny0uOTc1Ljk3LTIuNTYgMC0zLjUzNS0uOTgtLjk3Ni0yLjU2LS45NzYtMy41NCAwIDAgMC0yLjA2IDIuMDU1LTQuMzYgNC4zNTYtMS4xOCAxLjE4NS0yLjc5IDEuODUxLTQuNDcgMS44NTEtMS42NyAwLTMuMjgtLjY2Ni00LjQ3LTEuODUxbC0uMjUtLjI1MmMtMS4xOC0xLjE4Ni0xLjg1LTIuNzk0LTEuODUtNC40NyAwLTEuNjc3LjY3LTMuMjg1IDEuODUtNC40NzEgMi4zLTIuMyA0LjM2LTQuMzU2IDQuMzYtNC4zNTYuOTctLjk3NS45Ny0yLjU1OSAwLTMuNTM1LS45OC0uOTc2LTIuNTYtLjk3Ni0zLjU0IDB6bTE0Ljg4LTIuMTQ4LTExLjM0IDExLjM0Yy0uOTguOTc2LS45OCAyLjU2IDAgMy41MzYuOTcuOTc1IDIuNTYuOTc1IDMuNTMgMGwxMS4zNC0xMS4zNDFjLjk4LS45NzYuOTgtMi41NiAwLTMuNTM1LS45Ny0uOTc2LTIuNTYtLjk3Ni0zLjUzIDB6bTcuMDQgMTIuNzUzczIuMDctMi4wNjkgNC4zOC00LjM4YzIuMTMtMi4xMjMgMy4zMi01LjAwMyAzLjMyLTguMDA2IDAtMy4wMDItMS4xOS01Ljg4Mi0zLjMyLTguMDA1LS4wOC0uMDg0LS4xNi0uMTY4LS4yNS0uMjUyLTIuMTItMi4xMjQtNS0zLjMxNi04LTMuMzE2LTMuMDEgMC01Ljg5IDEuMTkyLTguMDEgMy4zMTYtMi4zIDIuMjk5LTQuMzUgNC4zNTQtNC4zNSA0LjM1NC0uOTguOTc2LS45OCAyLjU2IDAgMy41MzYuOTcuOTc1IDIuNTYuOTc1IDMuNTMgMCAwIDAgMi4wNi0yLjA1NSA0LjM2LTQuMzU1IDEuMTgtMS4xODUgMi43OS0xLjg1MSA0LjQ3LTEuODUxIDEuNjcgMCAzLjI4LjY2NiA0LjQ3IDEuODUxbC4yNS4yNTJjMS4xOCAxLjE4NiAxLjg1IDIuNzk0IDEuODUgNC40NyAwIDEuNjc3LS42NyAzLjI4NS0xLjg1IDQuNDcxLTIuMzEgMi4zMTEtNC4zOCA0LjM3OS00LjM4IDQuMzc5LS45OC45NzYtLjk4IDIuNTYgMCAzLjUzNi45Ny45NzUgMi41Ni45NzUgMy41MyAweiIgZmlsbD0idXJsKCNfTGluZWFyMSkiLz48L2c+PC9nPjwvZz48L3N2Zz4=" alt="自动识别" />
+                </div>
+                <div>
+                  <h3>自动识别</h3>
+                  <p>适合支持自动识别的客户端</p>
+                </div>
+              </div>
+            </div>
+            <div class="sub-actions">
+              <input id="autoUrl" readonly value="https://dingyueqi-2sq.pages.dev/sub/a1b2c3d4e5?token=demo" />
+              <button data-copy-target="autoUrl" type="button" class="secondary small">复制</button>
+              <button data-qrcode-target="autoUrl" type="button" class="secondary small">二维码</button>
+            </div>
+          </article>
+
+          <article class="sub-card">
+            <div class="sub-card-head">
+              <div class="client-meta">
+                <div class="client-icon">
+                  <img src="data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZlcnNpb249IjEuMSIgdmlld0JveD0iMCAwIDQwMCA0MDAiPgogIDwhLS0gR2VuZXJhdG9yOiBBZG9iZSBJbGx1c3RyYXRvciAyOS4wLjAsIFNWRyBFeHBvcnQgUGx1Zy1JbiAuIFNWRyBWZXJzaW9uOiAyLjEuMCBCdWlsZCAxODYpICAtLT4KICA8ZGVmcz4KICAgIDxzdHlsZT4KICAgICAgLnN0MCB7CiAgICAgICAgZmlsbDogI2ZiZmJmYjsKICAgICAgfQoKICAgICAgLnN0MCwgLnN0MSwgLnN0MiB7CiAgICAgICAgZmlsbC1ydWxlOiBldmVub2RkOwogICAgICB9CgogICAgICAuc3QzIHsKICAgICAgICBmaWxsOiAjMGI3OGFhOwogICAgICB9CgogICAgICAuc3Q0IHsKICAgICAgICBmaWxsOiAjMTQ5NGQ0OwogICAgICB9CgogICAgICAuc3QxIHsKICAgICAgICBmaWxsOiAjMDQxZDI2OwogICAgICB9CgogICAgICAuc3Q1IHsKICAgICAgICBmaWxsOiAjMDA1MTcyOwogICAgICB9CgogICAgICAuc3QyIHsKICAgICAgICBkaXNwbGF5OiBub25lOwogICAgICAgIGZpbGw6ICMyMDljY2Y7CiAgICAgIH0KCiAgICAgIC5zdDYgewogICAgICAgIGZpbGw6ICMwMDY0OGE7CiAgICAgIH0KICAgIDwvc3R5bGU+CiAgPC9kZWZzPgogIDxnIGlkPSJf5Zu+5bGCXzMiIGRhdGEtbmFtZT0i5Zu+5bGCXzMiPgogICAgPGNpcmNsZSBjbGFzcz0ic3Q0IiBjeD0iMjAwIiBjeT0iMjAwIiByPSIxOTQuOCIvPgogICAgPGNpcmNsZSBjbGFzcz0ic3QzIiBjeD0iMjAwIiBjeT0iMjAwIiByPSIxNjkuOSIvPgogICAgPGNpcmNsZSBjbGFzcz0ic3Q2IiBjeD0iMjAwIiBjeT0iMjAwIiByPSIxNDQuOSIvPgogICAgPGNpcmNsZSBjbGFzcz0ic3Q1IiBjeD0iMjAwIiBjeT0iMjAwIiByPSIxMTcuOSIvPgogIDwvZz4KICA8ZyBpZD0ic3ZnIj4KICAgIDxnIGlkPSJzdmdnIj4KICAgICAgPHBhdGggaWQ9InBhdGgwIiBjbGFzcz0ic3QwIiBkPSJNOTEuOSwxMDcuOWMtMSwuMy0xLjEsMjUuOSwwLDI2LjMuMy4xLDUuNS4yLDExLjQuMiwxMC43LDAsMTAuOCwwLDExLjIuOS40LjcuNCwyMi43LjMsOTIuNi0uMSw1MC40LS4xLDkxLjcsMCw5MS43LjYsMCwyLjUtMS44LDcuNS02LjgsMy4xLTMuMiw1MC01MC4xLDEwNC4xLTEwNC4zLDU0LjEtNTQuMiw5OC42LTk4LjksOTguNy05OS40bC4yLS45LTM4LC4zYy0yMC45LjItMzguMy40LTM4LjguNi0uNS4yLTIwLjQsMTkuNy00NC4zLDQzLjUtMjMuOSwyMy44LTQzLjcsNDMuMi00NC4xLDQzLjItLjYsMC0uNy0zLjYtLjktNDQtLjEtMjQuMi0uMi00NC0uMy00NC4xLS4yLS4yLTY2LjMsMC02NywuMiIvPgogICAgICA8cGF0aCBpZD0icGF0aDMiIGNsYXNzPSJzdDEiIGQ9Ik0xNTkuOSwxMjYuN2MtLjMsMS45LS4zLDY1LjYsMCw2Ny4ybC4yLDEuMiw1LjctNS43YzMuMS0zLjEsNi02LjIsNi41LTYuOS44LTEuMiwxLjUtNTIuNC44LTU1LjMtLjUtMi0xLjEtMi4xLTcuMi0yLjFoLTUuN2wtLjIsMS41TTMwOS41LDEyNy4xYy0xLjQuNC0xODAuOSwxODAuMy0xODEuNSwxODItLjQsMS4xLS4xLDI2LjguMywyNy45LjQuOS41LjgsMTQuMS0xMi42LDcuNC03LjIsMTQuNS0xNC4yLDE1LjktMTUuNSwxNy0xNiwxNzQuNi0xNzUsMTc5LjUtMTgxLjEuNi0uOC0yNS43LTEuNS0yOC40LS44TTEwNC4zLDEzNS45bC0xLjEuN3Y4LjFjMCw5LjYtLjQsOSw1LjksOC44aDQuM3YtMTguMWgtNGMtMy4yLS4yLTQuMiwwLTUuMS41Ii8+CiAgICAgIDxwYXRoIGlkPSJwYXRoNCIgY2xhc3M9InN0MiIgZD0iTTkxLjMsMTA3bC0uOS43djEzLjNjMCwxNS43LS41LDE0LjMsNS40LDE0LjIsOCwwLDEwLjUtLjYsMy4yLS43LTMuNiwwLTYuOC0uMi03LjEtLjMtLjYtLjItLjYtMS43LS42LTEzLjJ2LTEyLjlsLjktLjJjLjgtLjIsNjYuNi0uNCw2Ni44LS4yLDAsMCwuMiw0LjMuMyw5LjVsLjIsOS40di05LjJjLjEtNi45LDAtOS40LS4zLTkuOS0uOC0xLTY2LjQtMS41LTY3LjgtLjVNMjkwLjIsMTA3LjZjLTExLjQuMS0yNS42LjMtMzEuNC4zaC0xMC42YzAsMC0xMC4yLDEwLjItMTAuMiwxMC4yLTIyLjIsMjEuOS02My40LDYzLjEtNzAuMiw3MC4xLTYuOCw3LTcuOSw4LTguNCw3LS4xLS4yLS4yLS4yLDAsMCwuMywxLjQsNC40LTIuNSw0NC44LTQyLjcsMjMuOS0yMy44LDQzLjgtNDMuMyw0NC4zLTQzLjUuNS0uMiwxNy45LS40LDM4LjgtLjZsMzcuOS0uMy0uMiwxYy0uMS43LTUuMSw1LjgtMTUuMiwxNS44LTguMiw4LjEtMTUsMTQuOS0xNSwxNSwwLC4yLDMuMS0yLjksNy02LjcsMy45LTMuOCw3LjItNyw3LjQtN3MyLjQtMiw0LjctNC40YzIuNC0yLjQsNC43LTQuNSw1LjEtNC42LDEuMi0uNCw4LjEtNy42LDguMS04LjUsMC0yLDMuNi0xLjgtMzctMS4zTTExMy44LDEzNWMuNS41LjYsNCwuNCwzMC4xLS41LDczLS41LDE1NS43LS4yLDE1NS45LjkuNiwyLjgtLjMsMy41LTEuNi40LS43LDIuNS0zLjIsNC43LTUuNSwyLjItMi4zLDQuMi00LjQsNC40LTQuOHMyMi0yMi40LDQ4LjUtNDguOSw0OC00OC4yLDQ3LjktNDguMmMtLjIsMC04MS45LDgxLjYtMTAwLjksMTAwLjktNC45LDUtNi45LDYuNy03LjUsNi43czAtNDEuMywwLTkxLjdjLjItOTMsLjItOTMuNS0xLjItOTMuNXMtLjEuMy4yLjZNMjg0LjQsMTUwLjJjLTIuOSwzLTUuMyw1LjUtNS4yLDUuNSwwLDAsMi42LTIuNCw1LjctNS40LDMtMyw1LjQtNS41LDUuMi01LjUtLjIsMC0yLjcsMi40LTUuNyw1LjRNMjY3LjIsMTY3LjRjLTIuOSwzLTUuMyw1LjQtNS4yLDUuNSwwLDAsMi42LTIuNCw1LjctNS40LDMtMyw1LjQtNS41LDUuMi01LjUtLjIsMC0yLjcsMi40LTUuNyw1LjRNMjUwLDE4NC42Yy0yLjksMy01LjMsNS40LTUuMiw1LjUsMCwwLDIuNi0yLjQsNS43LTUuNCwzLTMsNS40LTUuNSw1LjItNS41LS4yLDAtMi43LDIuNC01LjcsNS40TTIzNC40LDIwMC4yYy0yLjksMy01LjMsNS41LTUuMiw1LjUsMCwwLDIuNi0yLjQsNS43LTUuNCwzLTMsNS40LTUuNSw1LjItNS41LS4yLDAtMi43LDIuNC01LjcsNS40Ii8+CiAgICA8L2c+CiAgPC9nPgo8L3N2Zz4=" alt="V2rayN" />
+                </div>
+                <div>
+                  <h3>V2rayN</h3>
+                  <p>适用于 V2rayN / v2rayNG</p>
+                </div>
+              </div>
+            </div>
+            <div class="sub-actions">
+              <input id="rawUrl" readonly />
+              <button data-copy-target="rawUrl" type="button" class="secondary small">复制</button>
+              <button data-qrcode-target="rawUrl" type="button" class="secondary small">二维码</button>
+            </div>
+          </article>
+
+          <article class="sub-card">
+            <div class="sub-card-head">
+              <div class="client-meta">
+                <div class="client-icon">
+                  <img src="data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPHN2ZyBpZD0ic3ZnIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZlcnNpb249IjEuMSIgdmlld0JveD0iMCAwIDQwMCA0MDAiPgogIDwhLS0gR2VuZXJhdG9yOiBBZG9iZSBJbGx1c3RyYXRvciAyOS4wLjAsIFNWRyBFeHBvcnQgUGx1Zy1JbiAuIFNWRyBWZXJzaW9uOiAyLjEuMCBCdWlsZCAxODYpICAtLT4KICA8ZGVmcz4KICAgIDxzdHlsZT4KICAgICAgLnN0MCB7CiAgICAgICAgZmlsbDogI2ZmZjsKICAgICAgICBmaWxsLXJ1bGU6IGV2ZW5vZGQ7CiAgICAgIH0KICAgIDwvc3R5bGU+CiAgPC9kZWZzPgogIDxnIGlkPSJzdmdnIj4KICAgIDxwYXRoIGlkPSJwYXRoMCIgY2xhc3M9InN0MCIgZD0iTTEzNy43LDY1LjRjLTUuOCwyLjMtMjUsMTI4LjctMzQuNywyMjguMmwtLjksOS42aC00Yy0zMi45LS4xLTQ0LjItMzAtMTguMy00OC4yLDEwLTcsMTEuMS05LjksNC44LTEyLjUtMTAuNy00LjUtMzAuNiwxMS0zNC43LDI3LTcuMiwyNy42LDEyLDUwLjYsNDQuMyw1Mi45LDMuOS4zLDguNC45LDEwLjIsMS41LDIwLjksNi43LDIxMS40LDUuNiwyMTYuMi0xLjMsNi4xLTguOC0zMi4zLTI1Ni41LTM5LjktMjU3LjUtNC4zLS42LTE0LjMsMTMuNC0yNS4yLDM1LjItMi42LDUuMy00LjgsOS42LTQuOSw5LjcsMCwwLTQtLjYtOC43LTEuNC0yMC40LTMuNS01NS40LTIuOC02Ni4xLDEuMy0uOC4zLTIuNC0yLTUuNC03LjItMTQuMS0yNS4xLTI2LjgtMzkuNS0zMi42LTM3LjJNMTcyLjUsMTU5LjJjOS42LDYuOCwzLjcsMjIuNC04LDIxLTE1LjEtMS43LTEzLTI0LjIsMi4xLTIzLDIsLjIsNC42LDEsNiwyTTI2OC42LDE1OS4yYzkuNiw2LjgsMy43LDIyLjQtOCwyMS0xNS4xLTEuNy0xMy0yNC4yLDIuMS0yMywyLC4yLDQuNiwxLDYsMk0yMTQuMSwxOTRjMi4yLDIuOCw1LjUsMy45LDguOCwzczQuNy4zLDIuNCwxLjljLTIuMywxLjctNy42LDEuMy0xMC43LS44bC0yLjctMS44LTIuMywxLjhjLTMuNiwyLjktMTIuMSwyLjQtMTIuMS0uOHMxLjUtLjUsMy40LS4yYzQsLjYsNi45LS41LDguNy0zLjIsMS41LTIuMywyLjUtMi4zLDQuMywwIi8+CiAgPC9nPgo8L3N2Zz4=">
+                </div>
+                <div>
+                  <h3>Clash</h3>
+                  <p>适用于 Clash / Mihomo / Clash Verge</p>
+                </div>
+              </div>
+            </div>
+            <div class="sub-actions">
+              <input id="clashUrl" readonly value="https://dingyueqi-2sq.pages.dev/sub/a1b2c3d4e5?target=clash&amp;token=demo" />
+              <button data-copy-target="clashUrl" type="button" class="secondary small">复制</button>
+              <button data-qrcode-target="clashUrl" type="button" class="secondary small">二维码</button>
+            </div>
+          </article>
+
+          <article class="sub-card">
+            <div class="sub-card-head">
+              <div class="client-meta">
+                <div class="client-icon">
+                  <img src="data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPHN2ZyBpZD0ic3ZnIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZlcnNpb249IjEuMSIgdmlld0JveD0iMCAwIDQwMCA0MDAiPgogIDwhLS0gR2VuZXJhdG9yOiBBZG9iZSBJbGx1c3RyYXRvciAyOS4wLjAsIFNWRyBFeHBvcnQgUGx1Zy1JbiAuIFNWRyBWZXJzaW9uOiAyLjEuMCBCdWlsZCAxODYpICAtLT4KICA8ZGVmcz4KICAgIDxzdHlsZT4KICAgICAgLnN0MCB7CiAgICAgICAgZmlsbDogIzZjOWVlYTsKICAgICAgfQoKICAgICAgLnN0MCwgLnN0MSB7CiAgICAgICAgZmlsbC1ydWxlOiBldmVub2RkOwogICAgICB9CgogICAgICAuc3QxIHsKICAgICAgICBmaWxsOiAjZmZmOwogICAgICB9CiAgICA8L3N0eWxlPgogIDwvZGVmcz4KICA8cG9seWdvbiBjbGFzcz0ic3QxIiBwb2ludHM9IjE5NS42IDI5MS4zIDE4My43IDMwNy43IDE5NS42IDM0MiAyMDUuMiAzMzguNiAyMTUuMiAzMDUgMjEwLjEgMjkxLjMgMTk1LjYgMjkxLjMiLz4KICA8cG9seWdvbiBjbGFzcz0ic3QxIiBwb2ludHM9IjE5OS44IDU2LjEgMTYzLjQgODkuNyAxNDIuMSAxNDQuNSAxNDIuMSAxODcgMTM4LjcgMTk2LjYgMTE2LjggMjQwLjUgMTE2LjggMjUwLjEgMTcyLjIgMjQzLjMgMTg5LjggMjY0LjUgMjE4LjMgMjU3LjYgMjI3LjUgMjQ4LjEgMjg1LjUgMjU0LjIgMjU4IDE5MS44IDI1NS4zIDEzMi4yIDIzNS40IDg4LjMgMTk5LjggNTYuMSIvPgogIDxnIGlkPSJzdmdnIj4KICAgIDxwYXRoIGlkPSJwYXRoMCIgY2xhc3M9InN0MCIgZD0iTTE5NS45LDQ4LjRjLTQwLjQsMjQuNi02NS4xLDc5LjItNjEuOSwxMzcsLjMsNC43LjMsOC45LjEsOS4yLS4yLjMtMS42LDEuOS0zLjIsMy42LTguMiw4LjgtMTQuNCwxOS43LTE3LjcsMzEuMy0yLjgsOS44LTUsMzMtMy4yLDMzczIuNC0uMyw0LjYtLjhjMTQuOC0yLjksMzIuMy02LjMsMzguOS03LjYsNC4zLS44LDguNS0xLjcsOS41LTEuOGwxLjctLjMsMS43LDMuNGMxMS43LDI0LDU0LjYsMjQsNjYuNywwLDEuNy0zLjMuNy0zLjIsMTAuNS0xLjMsNC4zLjksMTAuMiwyLDEzLDIuNiwyNi45LDUuMiwzMi40LDYuMywzMi45LDYuMSwxLjQtLjUuMi0xOC41LTEuOC0yOC40LS40LTEuOS0uNi0yLjgtMS42LTYuMi0yLjktMTAuNS05LjUtMjEuNy0xNy44LTMwLjRsLTIuOS0zdi0xMy4yYy41LTM1LjQtNi4zLTY0LjMtMjEtODkuOC0xMC45LTE5LTI4LjEtMzYuNy00NC00NS4yLS42LS4zLTEuNS4xLTQuNSwxLjlNMjA0LjYsNjguNmMyMS42LDE0LjQsMzkuOCw0NSw0NS43LDc2LjYuMywxLjQuNiwzLjQuOCw0LjQuNCwyLjEsMSw2LjUsMS42LDEyLjIuNiw1LjUuNiwyNC4yLDAsMjkuNWwtLjUsNC4zLDQuMiw0LjRjMTEuNSwxMiwxOC4zLDI4LjUsMTguMyw0NC42djEuOXMtMS4zLS4zLTEuMy0uM2MtLjctLjEtMi45LS42LTQuOS0xLTUuOC0xLjItNDAuMS04LTQwLjYtOHMtMS4xLDEuMy0xLjksMi45Yy0xMS42LDIzLjEtNDAuNiwyMy4zLTUxLjguNC0xLjEtMi4zLTIuMS00LjEtMi4yLTQuMS0uMiwwLTMyLjUsNi40LTQzLjcsOC42LTMuNy43LTMuNSwxLTIuOS00LjUsMS44LTE3LjQsNy40LTI5LjgsMTguNS00MS4xbDQtNC0uNC05LjJjLTIuNC01MS4zLDE1LTkzLjcsNDguNC0xMTcuNyw0LjItMywzLjktMyw4LjYuMk0xOTUuOCwxMTcuMmMtMjAuMiwyLjYtMzAuNCwyNi4zLTE4LjcsNDMuMywxMS42LDE2LjgsMzguNiwxNC44LDQ3LjQtMy40LDkuOS0yMC41LTYuMi00Mi44LTI4LjctMzkuOU0yMDIuNCwxMjguOGM5LjcsMS44LDE1LjUsMTIuOSwxMS41LDIxLjctNS41LDEyLjEtMjIuNCwxMi43LTI4LjQsMS4xLTYtMTEuNiw0LjEtMjUuMiwxNi45LTIyLjhNMTk1LjcsMjg0LjJjLTUuNywxLjQtMTEuMiw2LjEtMTQuMywxMi4yLTYuNCwxMi43LTIuMSwyOSwxNC4zLDU0LjMsMy44LDUuOCwzLjQsNS44LDcsMSw3LjktMTAuNywxNS4yLTI0LjksMTcuMy0zMy43LDEuMS00LjgsMS4zLTUuOCwxLjMtOC42LDAtMTUuOC0xMi43LTI4LjQtMjUuNS0yNS4yTTIwNC4xLDI5OGM1LjUsMy41LDcuNSwxMS45LDQuOCwxOS45LTEuOSw1LjYtOCwxNy43LTguOSwxNy43LTEuOSwwLTkuOC0xOC41LTEwLjMtMjMuOC0uOC0xMC4zLDcuNC0xOC4yLDE0LjQtMTMuOCIvPgogICAgPHBhdGggaWQ9InBhdGgxIiBjbGFzcz0ic3QwIiBkPSJNMjA0LjksNDkuMmMzOC43LDI0LjEsNjEuMiw3My4yLDYwLjYsMTMyLjJ2MTMuMmMtLjEsMCwyLjgsMywyLjgsMyw2LjYsNi45LDExLjIsMTQsMTUuMSwyMi45LDEuNyw0LDEuOSw0LjYsMy41LDEwLjMsMS44LDYuNywzLjEsMTcuNiwzLjIsMjYuMSwwLDQuMi0uMSw1LjYtLjUsNS43LS41LjItNi0uOS0zMi45LTYuMS0yLjktLjYtOC43LTEuNy0xMy0yLjYtOS44LTItOC44LTIuMS0xMC41LDEuMy0xMiwyNC4xLTU0LjksMjQuMS02Ni43LDBsLTEuNy0zLjQtMS43LjNjLS45LjEtNS4yLDEtOS41LDEuOC02LjYsMS4zLTI0LjIsNC43LTM4LjksNy42LTIuMi40LTQuMi44LTQuNi44LTEuOCwwLC40LTIzLjIsMy4yLTMzLDMuMy0xMS42LDkuNS0yMi41LDE3LjctMzEuMywxLjYtMS43LDMtMy4zLDMuMi0zLjYuMi0uMy4xLTQuNC0uMS05LjItMi44LTUwLjQsMTUuNS05OC43LDQ3LjgtMTI2LjUsOC4xLTcsMTcuMy0xMy4xLDE4LjctMTIuNC40LjIsMi40LDEuNCw0LjUsMi43TTE5Niw2OC41Yy0zMy40LDI0LTUwLjgsNjYuNC00OC40LDExNy43bC40LDkuMi00LDRjLTExLjEsMTEuMy0xNi43LDIzLjctMTguNSw0MS4xLS42LDUuNi0uOCw1LjMsMi45LDQuNSwxMS4yLTIuMiw0My41LTguNiw0My43LTguNnMxLjEsMS44LDIuMiw0LjFjMTEuMywyMi45LDQwLjMsMjIuNyw1MS44LS40LjgtMS42LDEuNi0yLjksMS45LTIuOS41LDAsMzQuNyw2LjcsNDAuNiw4LDIsLjQsNC4yLjksNC45LDFsMS4zLjN2LTEuOWMwLTE2LjEtNi44LTMyLjYtMTguMy00NC42bC00LjItNC40LjUtNC4zYy43LTUuMy43LTI0LDAtMjkuNS0uNi01LjctMS4yLTEwLjEtMS42LTEyLjItLjItMS0uNi0zLS44LTQuNC01LjktMzEuNi0yNC4xLTYyLjEtNDUuNy03Ni42LTQuOC0zLjItNC41LTMuMi04LjYtLjJNMjA2LjYsMTE3LjhjMjUuMiw2LjYsMjguNSw0MC44LDUsNTEuNy0xOC43LDguNi0zOS4zLTQuNS0zOS4zLTI0LjlzMTYuOC0zMS40LDM0LjMtMjYuOE0xOTUuNiwxMjljLTkuOSwyLjctMTQuOCwxMy42LTEwLjEsMjIuNSw2LDExLjcsMjIuOSwxMSwyOC40LTEuMSw1LjMtMTEuNi01LjktMjQuOC0xOC4zLTIxLjVNMjAzLjcsMjg0LjJjMTEuNiwzLDE5LjksMTcuNiwxNywzMC4xLTEuMyw2LTEuNyw3LjItMy40LDExLjUtMy42LDkuMS0xNiwyOS43LTE4LDI5LjgtLjUsMC01LjUtNy40LTguOS0xMy4zLTEyLTIwLjctMTQuOC0zNC42LTkuMS00NS45LDQuOC05LjQsMTMuOS0xNC40LDIyLjQtMTIuMk0xOTYuNCwyOTcuNGMtOS4zLDUuMS04LjgsMTcuNywxLjUsMzUuMywyLjEsMy41LDIsMy42LDQuMi0uNCw4LjctMTUuMywxMC0yNCw0LjktMzEuNC0yLjUtMy42LTcuNS01LjItMTAuNy0zLjUiLz4KICA8L2c+Cjwvc3ZnPg==" alt="Shadowrocket" />
+                </div>
+                <div>
+                  <h3>Shadowrocket</h3>
+                  <p>适用于 iPhone / iPad 小火箭</p>
+                </div>
+              </div>
+            </div>
+            <div class="sub-actions">
+              <input id="rocketUrl" readonly />
+              <button data-copy-target="rocketUrl" type="button" class="secondary small">复制</button>
+              <button data-qrcode-target="rocketUrl" type="button" class="secondary small">二维码</button>
+            </div>
+          </article>
+
+          <article class="sub-card">
+            <div class="sub-card-head">
+              <div class="client-meta">
+                <div class="client-icon">
+                  <img src="data:image/svg+xml;base64,PHN2ZyBjbGlwLXJ1bGU9ImV2ZW5vZGQiIGZpbGwtcnVsZT0iZXZlbm9kZCIgaGVpZ2h0PSI1MTIiIHN0cm9rZS1saW5lam9pbj0icm91bmQiIHN0cm9rZS1taXRlcmxpbWl0PSIyIiB2aWV3Qm94PSIwIDAgNDggNDgiIHdpZHRoPSI1MTIiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgeG1sbnM6eGxpbms9Imh0dHA6Ly93d3cudzMub3JnLzE5OTkveGxpbmsiPjxsaW5lYXJHcmFkaWVudCBpZD0iX0xpbmVhcjEiIGdyYWRpZW50VHJhbnNmb3JtPSJtYXRyaXgoMjggLTI5IDI5IDI4IDEyNzkuNTcgMTMxLjc4NSkiIGdyYWRpZW50VW5pdHM9InVzZXJTcGFjZU9uVXNlIiB4MT0iMCIgeDI9IjEiIHkxPSIwIiB5Mj0iMCI+PHN0b3Agb2Zmc2V0PSIwIiBzdG9wLWNvbG9yPSIjMDA1NmUwIi8+PHN0b3Agb2Zmc2V0PSIuMDEiIHN0b3AtY29sb3I9IiMwMDU2ZTAiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiMwMGU1YjgiLz48L2xpbmVhckdyYWRpZW50PjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKC0xNTkgLTUzKSI+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoLTExMDkuNTcgLTQwLjc4NSkiPjxnIGlkPSJuZ2ljb24iPjxwYXRoIGQ9Im0xMjgxLjU5IDExMi40OTVzLTIuMDUgMi4wNTUtNC4zNSA0LjM1NmMtMi4xMyAyLjEyMy0zLjMyIDUuMDAzLTMuMzIgOC4wMDYgMCAzLjAwMiAxLjE5IDUuODgyIDMuMzIgOC4wMDUuMDguMDg0LjE2LjE2OC4yNS4yNTIgMi4xMiAyLjEyMyA1IDMuMzE2IDggMy4zMTYgMy4wMSAwIDUuODktMS4xOTMgOC4wMS0zLjMxNiAyLjMtMi4zIDQuMzYtNC4zNTYgNC4zNi00LjM1Ni45Ny0uOTc1Ljk3LTIuNTYgMC0zLjUzNS0uOTgtLjk3Ni0yLjU2LS45NzYtMy41NCAwIDAgMC0yLjA2IDIuMDU1LTQuMzYgNC4zNTYtMS4xOCAxLjE4NS0yLjc5IDEuODUxLTQuNDcgMS44NTEtMS42NyAwLTMuMjgtLjY2Ni00LjQ3LTEuODUxbC0uMjUtLjI1MmMtMS4xOC0xLjE4Ni0xLjg1LTIuNzk0LTEuODUtNC40NyAwLTEuNjc3LjY3LTMuMjg1IDEuODUtNC40NzEgMi4zLTIuMyA0LjM2LTQuMzU2IDQuMzYtNC4zNTYuOTctLjk3NS45Ny0yLjU1OSAwLTMuNTM1LS45OC0uOTc2LTIuNTYtLjk3Ni0zLjU0IDB6bTE0Ljg4LTIuMTQ4LTExLjM0IDExLjM0Yy0uOTguOTc2LS45OCAyLjU2IDAgMy41MzYuOTcuOTc1IDIuNTYuOTc1IDMuNTMgMGwxMS4zNC0xMS4zNDFjLjk4LS45NzYuOTgtMi41NiAwLTMuNTM1LS45Ny0uOTc2LTIuNTYtLjk3Ni0zLjUzIDB6bTcuMDQgMTIuNzUzczIuMDctMi4wNjkgNC4zOC00LjM4YzIuMTMtMi4xMjMgMy4zMi01LjAwMyAzLjMyLTguMDA2IDAtMy4wMDItMS4xOS01Ljg4Mi0zLjMyLTguMDA1LS4wOC0uMDg0LS4xNi0uMTY4LS4yNS0uMjUyLTIuMTItMi4xMjQtNS0zLjMxNi04LTMuMzE2LTMuMDEgMC01Ljg5IDEuMTkyLTguMDEgMy4zMTYtMi4zIDIuMjk5LTQuMzUgNC4zNTQtNC4zNSA0LjM1NC0uOTguOTc2LS45OCAyLjU2IDAgMy41MzYuOTcuOTc1IDIuNTYuOTc1IDMuNTMgMCAwIDAgMi4wNi0yLjA1NSA0LjM2LTQuMzU1IDEuMTgtMS4xODUgMi43OS0xLjg1MSA0LjQ3LTEuODUxIDEuNjcgMCAzLjI4LjY2NiA0LjQ3IDEuODUxbC4yNS4yNTJjMS4xOCAxLjE4NiAxLjg1IDIuNzk0IDEuODUgNC40NyAwIDEuNjc3LS42NyAzLjI4NS0xLjg1IDQuNDcxLTIuMzEgMi4zMTEtNC4zOCA0LjM3OS00LjM4IDQuMzc5LS45OC45NzYtLjk4IDIuNTYgMCAzLjUzNi45Ny45NzUgMi41Ni45NzUgMy41MyAweiIgZmlsbD0idXJsKCNfTGluZWFyMSkiLz48L2c+PC9nPjwvZz48L3N2Zz4=" alt="明文链接" />
+                </div>
+                <div>
+                  <h3>明文链接</h3>
+                  <p>逐行明文节点链接（非 Base64），打开即可看/复制</p>
+                </div>
+              </div>
+            </div>
+            <div class="sub-actions">
+              <input id="plainUrl" readonly />
+              <button data-copy-target="plainUrl" type="button" class="secondary small">复制</button>
+              <button data-qrcode-target="plainUrl" type="button" class="secondary small">二维码</button>
+            </div>
+          </article>
+
+          <article class="sub-card sub-card-wide">
+            <div class="sub-card-head">
+              <div class="client-meta">
+                <div class="client-icon">
+                  <img src="data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPHN2ZyBpZD0ic3ZnIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZlcnNpb249IjEuMSIgdmlld0JveD0iMCAwIDQwMCA0MDAiPgogIDwhLS0gR2VuZXJhdG9yOiBBZG9iZSBJbGx1c3RyYXRvciAyOS4wLjAsIFNWRyBFeHBvcnQgUGx1Zy1JbiAuIFNWRyBWZXJzaW9uOiAyLjEuMCBCdWlsZCAxODYpICAtLT4KICA8ZGVmcz4KICAgIDxzdHlsZT4KICAgICAgLnN0MCB7CiAgICAgICAgZmlsbDogIzAwODBmZjsKICAgICAgICBmaWxsLXJ1bGU6IGV2ZW5vZGQ7CiAgICAgIH0KICAgIDwvc3R5bGU+CiAgPC9kZWZzPgogIDxnIGlkPSJzdmdnIj4KICAgIDxwYXRoIGlkPSJwYXRoMCIgY2xhc3M9InN0MCIgZD0iTTI1MC4xLDc1LjhjLTQuMSwxLjMtNy44LDQuNS05LjYsOC4ybC0xLjEsMi4yLS4yLDYwLjhjLS4yLDYzLjktLjIsNjQuNiwxLjQsNjcuOSw2LjYsMTIuOSwyNS41LDEwLjgsMjkuMi0zLjQuOC0yLjkuOC0xMjEuNSwwLTEyNC4zLTIuNC04LjctMTEuNy0xNC4xLTE5LjgtMTEuNE0xOTUuNSw5OS4yYy00LjQsMS41LTcuOCw0LjUtOS44LDguN2wtMS4xLDIuM3YxNzkuNmwxLjMsMi42YzUuOSwxMiwyMi40LDEyLDI4LjMsMGwxLjMtMi42VjExMC4ybC0xLjEtMi4zYy0zLjQtNy4zLTExLjctMTEuMS0xOC45LTguN00zMDUuNCwxMTQuNmMtNS42LDEuNi05LjUsNS40LTExLjIsMTEtLjgsMi43LS44LDM3LDAsMzkuNyw0LjIsMTMuOCwyMi4xLDE1LjQsMjkuMSwyLjZsMS4zLTIuNXYtNDBsLTEuMi0yLjRjLTMuNC02LjgtMTEuMS0xMC40LTE4LTguNU0xNDIsMTc3Yy02LjEsMS40LTEwLjQsNS44LTExLjksMTItLjYsMi43LS44LDExMS41LS4yLDEyMC4zLDEuMiwxNy44LDIzLjYsMjEuNSwzMC4yLDUuMSwxLjItMi45LDEtMTI0LjYtLjItMTI3LjctMi43LTcuMS0xMC43LTExLjQtMTgtOS43TTg1LjYsMjI0LjNjLTMuOCwxLjMtNy4zLDQuNi05LjEsOC41bC0xLjEsMi4ydjM5LjJsMS4xLDIuMmM2LjQsMTMuNywyNi4xLDExLjcsMjkuNS0yLjkuOS0zLjguNS0zNi40LS40LTM5LjMtMi43LTguMi0xMS45LTEyLjgtMjAtMTAiLz4KICA8L2c+Cjwvc3ZnPg==" alt="Surge" />
+                </div>
+                <div>
+                  <h3>Surge</h3>
+                  <p>适用于 Surge Profile 导入</p>
+                </div>
+              </div>
+            </div>
+            <div class="sub-actions">
+              <input id="surgeUrl" readonly />
+              <button data-copy-target="surgeUrl" type="button" class="secondary small">复制</button>
+              <button data-qrcode-target="surgeUrl" type="button" class="secondary small">二维码</button>
+            </div>
+            <p class="hint">当前 Surge 导出以 VMess / Trojan 为主；你的示例 VMess 节点适用。</p>
+          </article>
+        </div>
+
+        <div class="preview-wrap">
+          <h3>明文节点链接（一行一个，可整段复制）</h3>
+          <textarea id="plainLinks" rows="8" readonly placeholder="">vless://demo-uuid@104.16.8.8:443?security=tls&amp;sni=cdn.example.com#美国31-v6单栈-极速 | HK-01 | 104.16.8.8
+vmess://demo-base64@104.17.2.3:2053#美国31 | HK-01 | 104.17.2.3</textarea>
+          <div class="actions">
+            <button data-copy-target="plainLinks" type="button" class="secondary small">复制全部明文链接</button>
+          </div>
+        </div>
+
+        <div class="preview-wrap">
+          <h3>预览全部生成节点</h3>
+          <div class="table-wrap preview-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>名称</th>
+                  <th>类型</th>
+                  <th>服务器</th>
+                  <th>端口</th>
+                  <th>Host</th>
+                  <th>SNI</th>
+                </tr>
+              </thead>
+              <tbody id="previewBody"><tr><td>美国31-v6单栈-极速 | HK-01 | 104.16.8.8</td><td>vless</td><td>104.16.8.8</td><td>443</td><td>cdn.example.com</td><td>cdn.example.com</td></tr><tr><td>美国31 | HK-01 | 104.17.2.3</td><td>vmess</td><td>104.17.2.3</td><td>2053</td><td>cdn.example.com</td><td>-</td></tr><tr><td>自建 HK | HK-01 | cf.example.com</td><td>trojan</td><td>cf.example.com</td><td>443</td><td>-</td><td>hk.example.com</td></tr><tr><td>美国31 #2 | HK-01 | 104.16.8.8</td><td>vless</td><td>104.16.8.8</td><td>443</td><td>cdn.example.com</td><td>cdn.example.com</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+      </div>
+
+      <section id="adminSection" class="card stack-lg">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">管理</p>
+            <h2>KV 条目管理</h2>
+            <p class="section-desc">条目永久保存后靠这里区分和清理：能看到每条订阅是哪台 VPS、什么时候生成的，可改备注、可删除；点每行的“链接”还能展开和上方结果区同款的各客户端链接卡片。需要填访问令牌（SUB_ACCESS_TOKEN）。</p>
+          </div>
+        </div>
+
+        <div class="sub-actions">
+          <input id="adminToken" type="password" placeholder="填入 SUB_ACCESS_TOKEN" autocomplete="off" />
+          <button id="listBtn" type="button" class="secondary small">加载条目列表</button>
+        </div>
+        <div id="adminMsg" class="hint"></div>
+
+        <div class="admin-toolbar">
+          <label for="sortSelect">排序</label>
+          <select id="sortSelect">
+            <option value="created-desc" selected>创建时间倒序（新 → 旧）</option>
+            <option value="created-asc">创建时间顺序（旧 → 新）</option>
+            <option value="name-asc">名称顺序（A → Z）</option>
+            <option value="name-desc">名称倒序（Z → A）</option>
+            <option value="remaining-asc">剩余有效期顺序（先到期在前）</option>
+            <option value="remaining-desc">剩余有效期倒序（晚到期在前）</option>
+          </select>
+          <label for="adminSearch">搜索</label>
+          <input id="adminSearch" type="search" placeholder="按备注、标签或来源 VPS / 节点搜索" autocomplete="off" />
+          <span class="toolbar-spacer"></span>
+          <button id="expandAllBtn" type="button" class="secondary small">展开全部</button>
+          <button id="collapseAllBtn" type="button" class="secondary small">收起全部</button>
+          <button id="deleteSelectedBtn" type="button" class="secondary small" disabled>删除所选</button>
+        </div>
+
+        <div id="tagFilterBar" class="tag-filter-bar hidden">
+          <span class="tag-filter-label">标签筛选</span>
+          <span id="tagFilterChips" class="tag-chips"><button type="button" class="tag-chip is-on">全部</button><span class="tag-chip"><span class="chip-grip" aria-hidden="true"><svg width="9" height="15" viewBox="0 0 10 16" fill="currentColor"><circle cx="2.5" cy="3" r="1.4"/><circle cx="7.5" cy="3" r="1.4"/><circle cx="2.5" cy="8" r="1.4"/><circle cx="7.5" cy="8" r="1.4"/><circle cx="2.5" cy="13" r="1.4"/><circle cx="7.5" cy="13" r="1.4"/></svg></span><span>主力</span></span><span class="tag-chip"><span class="chip-grip" aria-hidden="true"><svg width="9" height="15" viewBox="0 0 10 16" fill="currentColor"><circle cx="2.5" cy="3" r="1.4"/><circle cx="7.5" cy="3" r="1.4"/><circle cx="2.5" cy="8" r="1.4"/><circle cx="7.5" cy="8" r="1.4"/><circle cx="2.5" cy="13" r="1.4"/><circle cx="7.5" cy="13" r="1.4"/></svg></span><span>备用</span></span></span>
+          <span class="tag-mode-toggle" role="group" aria-label="多标签筛选模式">
+            <button id="tagModeAnd" type="button" class="tag-mode-btn is-active">包含全部</button>
+            <button id="tagModeOr" type="button" class="tag-mode-btn">包含任一</button>
+          </span>
+          <button id="tagFilterClear" type="button" class="secondary small hidden">清除</button>
+        </div>
+
+        <div class="admin-wrap">
+          <div class="admin-head">
+            <span><input type="checkbox" id="selectAllEntries" aria-label="全选当前显示的条目" /></span>
+            <span>备注（可改）</span>
+            <span>创建时间</span>
+            <span>有效期</span>
+            <span>来源 VPS / 节点</span>
+            <span>生成节点数</span>
+            <span>操作</span>
+          </div>
+          <div id="adminBody" class="admin-list"><div class="entry">
+        <div class="entry-row">
+          <div class="cell"><input type="checkbox" class="entry-check" aria-label="选择这条" /></div>
+          <div class="cell note-cell"><textarea class="note-input" maxlength="80" rows="4" placeholder="（未填备注）">主力自建，晚高峰稳</textarea><div class="note-save-status" role="status" aria-live="polite"></div><div class="entry-tags"><span class="tag-chip">主力</span></div></div>
+          <div class="cell">2026-11-25 21:14</div>
+          <div class="cell">永久</div>
+          <div class="cell">手写 2 行<br><span class="hint">动态订阅 · 2 个来源跟随更新</span></div>
+          <div class="cell">90</div>
+          <div class="cell">
+            <div class="admin-actions">
+              <button type="button" class="secondary small" data-admin-action="links">链接</button>
+              <button type="button" class="secondary small" data-admin-action="tags">标签</button>
+              <button type="button" class="secondary small" data-admin-action="retention">修改有效期</button>
+              <button type="button" class="secondary small" data-admin-action="delete">删除</button>
+              <button type="button" class="secondary small span-all" data-admin-action="backfill">回填到生成区</button>
+            </div>
+          </div>
+        </div>
+        <div class="entry-detail slide open"><div class="slide-inner">
+          <div class="sub-actions">
+            <input readonly value="https://dingyueqi-2sq.pages.dev/sub/a1b2c3d4e5?token=demo" />
+            <button type="button" class="secondary small">复制</button>
+            <button type="button" class="secondary small">二维码</button>
+          </div>
+          <div class="tags-edit-chips tag-chips" style="margin-top:12px">
+            <span class="tag-chip"><span class="chip-grip" aria-hidden="true"><svg width="9" height="15" viewBox="0 0 10 16" fill="currentColor"><circle cx="2.5" cy="3" r="1.4"/><circle cx="7.5" cy="3" r="1.4"/><circle cx="2.5" cy="8" r="1.4"/><circle cx="7.5" cy="8" r="1.4"/><circle cx="2.5" cy="13" r="1.4"/><circle cx="7.5" cy="13" r="1.4"/></svg></span><span>主力</span></span>
+            <span class="tag-chip"><span class="chip-grip" aria-hidden="true"><svg width="9" height="15" viewBox="0 0 10 16" fill="currentColor"><circle cx="2.5" cy="3" r="1.4"/><circle cx="7.5" cy="3" r="1.4"/><circle cx="2.5" cy="8" r="1.4"/><circle cx="7.5" cy="8" r="1.4"/><circle cx="2.5" cy="13" r="1.4"/><circle cx="7.5" cy="13" r="1.4"/></svg></span><span>晚高峰</span></span>
+          </div>
+        </div></div>
+      </div><div class="entry">
+        <div class="entry-row">
+          <div class="cell"><input type="checkbox" class="entry-check" aria-label="选择这条" /></div>
+          <div class="cell note-cell"><textarea class="note-input" maxlength="80" rows="4" placeholder="（未填备注）"></textarea><div class="note-save-status" role="status" aria-live="polite"></div></div>
+          <div class="cell">2026-11-20 09:02</div>
+          <div class="cell">剩 21 天</div>
+          <div class="cell">手写 34 行</div>
+          <div class="cell">34</div>
+          <div class="cell">
+            <div class="admin-actions">
+              <button type="button" class="secondary small" data-admin-action="links">链接</button>
+              <button type="button" class="secondary small" data-admin-action="tags">标签</button>
+              <button type="button" class="secondary small" data-admin-action="retention">修改有效期</button>
+              <button type="button" class="secondary small" data-admin-action="delete">删除</button>
+              <button type="button" class="secondary small span-all" data-admin-action="backfill">回填到生成区</button>
+            </div>
+          </div>
+        </div>
+      </div>
+            <div class="admin-empty">尚未加载。填好令牌后点“加载条目列表”。</div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="page-diag">
+      <button id="diagExportBtn" type="button" class="secondary small">导出诊断日志（已脱敏）</button>
+      <span id="diagStatus" class="hint" role="status" aria-live="polite"></span>
+      <p class="hint">遇到故障时点此导出一份日志文件发给维护者排查。日志只含版本号、环境、操作成败与耗时、计数等信息，已脱敏：不含管理令牌、节点链接、优选地址、备注与标签内容。</p>
+    </footer>
+
+    <div class="quick-dock">
+      <div class="quick-nav-group" role="navigation" aria-label="快速定位">
+        <button class="quick-nav" type="button" data-target="generator-form">生成</button>
+        <button class="quick-nav" type="button" data-target="resultSection">结果</button>
+        <button class="quick-nav" type="button" data-target="adminSection">管理</button>
+      </div>
+      <button id="backTopBtn" class="back-top" type="button" aria-label="回到顶部" title="回到顶部">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M12 19V5M5 12l7-7 7 7" stroke="white" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+    </div>
+
+    <div id="qrModal" class="modal hidden" aria-hidden="true">
+      <div class="modal-backdrop" data-close-modal="true"></div>
+      <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="qrTitle">
+        <div class="modal-head">
+          <div>
+            <p class="eyebrow">二维码导入</p>
+            <h3 id="qrTitle">订阅二维码</h3>
+          </div>
+          <button id="closeQrModal" type="button" class="secondary small">关闭</button>
+        </div>
+        <div class="modal-body">
+          <div id="qrCanvas" class="qr-box"></div>
+          <p id="qrText" class="hint qr-text"></p>
+        </div>
+      </div>
+    </div>
+    <!-- qrcodejs 1.0.0, self-hosted (was loaded from cdnjs): the page
+         holds the admin token, so it must not execute third-party-hosted
+         scripts. Bytes verified identical across two CDNs at vendoring
+         time; sha256 c541ef06327885a8415bca8df6071e14189b4855336def4f36db54bde8484f36. -->
+    
+    
+  </body>
+</html>

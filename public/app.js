@@ -277,10 +277,12 @@ function makeChipsSortable(container, chipSelector, { onReorder, trashEl = null,
     if (event.button !== undefined && event.button !== 0) return;
     const chip = event.target.closest(chipSelector);
     if (!chip || !container.contains(chip)) return;
-    // A nested button inside a chip (the ×) stays a plain tap; a chip
-    // that IS a button (filter chips) drags from its whole body.
-    const innerBtn = event.target.closest('button');
-    if (innerBtn && innerBtn !== chip) return;
+    // Drags start ONLY from the chip's six-dot grip: a press anywhere
+    // else on the chip (its label, the ×, the eye) is a plain tap, and
+    // the chip body never advertises a grab cursor. This keeps the
+    // whole card from looking draggable when only the grip is.
+    const grip = event.target.closest('.chip-grip');
+    if (!grip || !chip.contains(grip)) return;
     const state = {
       chip, x: event.clientX, y: event.clientY,
       active: false, timer: null, placeholder: null, overTrash: false, grabDX: 0, grabDY: 0, originDX: 0, originDY: 0, trashText: null,
@@ -343,6 +345,9 @@ function makeChipsSortable(container, chipSelector, { onReorder, trashEl = null,
 // them on every (re)build, so a dynamic entry's names track its
 // preferred endpoints as they refresh.
 const NAME_FORMAT_LABELS = { name: '原始名称', prefix: '批量备注', endpoint: '优选地址', remark: '端点备注' };
+// Six-dot grip: the ONLY drag handle on sortable chips (see
+// makeChipsSortable's pointerdown gate and .chip-grip in styles.css).
+const CHIP_GRIP_HTML = '<span class="chip-grip" aria-hidden="true"><svg width="9" height="15" viewBox="0 0 10 16" fill="currentColor"><circle cx="2.5" cy="3" r="1.4"/><circle cx="7.5" cy="3" r="1.4"/><circle cx="2.5" cy="8" r="1.4"/><circle cx="7.5" cy="8" r="1.4"/><circle cx="2.5" cy="13" r="1.4"/><circle cx="7.5" cy="13" r="1.4"/></svg></span>';
 const NAME_FORMAT_DEFAULT = [
   { key: 'name', on: true },
   { key: 'prefix', on: true },
@@ -372,7 +377,7 @@ function renderNameFormatExample() {
 function renderNameFormatChips() {
   if (!nameFormatChips) return;
   nameFormatChips.innerHTML = nameFormatState.map((c) => `
-    <span class="tag-chip nf-chip${c.on ? '' : ' is-off'}" data-sort-value="${c.key}"><span class="nf-label">${NAME_FORMAT_LABELS[c.key]}</span><button type="button" class="nf-eye" data-nf-toggle="${c.key}" aria-label="${c.on ? '隐藏' : '显示'}${NAME_FORMAT_LABELS[c.key]}">👁</button></span>`).join('');
+    <span class="tag-chip nf-chip${c.on ? '' : ' is-off'}" data-sort-value="${c.key}">${CHIP_GRIP_HTML}<span class="nf-label">${NAME_FORMAT_LABELS[c.key]}</span><button type="button" class="nf-eye" data-nf-toggle="${c.key}" aria-label="${c.on ? '隐藏' : '显示'}${NAME_FORMAT_LABELS[c.key]}">👁</button></span>`).join('');
   renderNameFormatExample();
 }
 function setNameFormat(format) {
@@ -441,7 +446,7 @@ function renderGenTagSuggestions() {
 function renderGenTags() {
   if (genTagChips) {
     genTagChips.innerHTML = genTags
-      .map((t, i) => `<span class="tag-chip" data-sort-value="${escapeHtml(t)}">${escapeHtml(t)}<button type="button" class="tag-chip-x" data-gen-tag-remove="${i}" aria-label="移除标签 ${escapeHtml(t)}">×</button></span>`)
+      .map((t, i) => `<span class="tag-chip" data-sort-value="${escapeHtml(t)}">${CHIP_GRIP_HTML}${escapeHtml(t)}<button type="button" class="tag-chip-x" data-gen-tag-remove="${i}" aria-label="移除标签 ${escapeHtml(t)}">×</button></span>`)
       .join('');
   }
   renderGenTagSuggestions();
@@ -1252,7 +1257,7 @@ function renderTagFilterBar() {
   if (!vocab.length) return;
   const sel = selectedTagLowers();
   tagFilterChips.innerHTML = vocab
-    .map((v) => `<button type="button" class="tag-chip tag-chip-filter${sel.has(String(v.tag).toLowerCase()) ? ' is-on' : ''}" data-tag-filter="${escapeHtml(v.tag)}" data-sort-value="${escapeHtml(v.tag)}" title="点按筛选；长按拖动排序，拖到左侧放开可删除">${escapeHtml(v.tag)} · ${v.count}</button>`)
+    .map((v) => `<button type="button" class="tag-chip tag-chip-filter${sel.has(String(v.tag).toLowerCase()) ? ' is-on' : ''}" data-tag-filter="${escapeHtml(v.tag)}" data-sort-value="${escapeHtml(v.tag)}" title="点按筛选；按住左端拖柄拖动排序，拖到左侧放开可删除">${CHIP_GRIP_HTML}${escapeHtml(v.tag)} · ${v.count}</button>`)
     .join('');
   if (tagFilterClear) tagFilterClear.classList.toggle('hidden', adminState.tagSelected.size === 0);
   if (tagModeAndBtn) tagModeAndBtn.classList.toggle('is-active', adminState.tagMode === 'and');
@@ -2233,7 +2238,7 @@ function renderTagsPanel(panel) {
   // re-renders everything right after.
   if (chips && !chips.classList.contains('chip-sorting')) {
     chips.innerHTML = panel._tags.length
-      ? panel._tags.map((t, i) => `<span class="tag-chip" data-sort-value="${escapeHtml(t)}">${escapeHtml(t)}<button type="button" class="tag-chip-x" data-tags-remove="${i}" aria-label="移除标签 ${escapeHtml(t)}">×</button></span>`).join('')
+      ? panel._tags.map((t, i) => `<span class="tag-chip" data-sort-value="${escapeHtml(t)}">${CHIP_GRIP_HTML}${escapeHtml(t)}<button type="button" class="tag-chip-x" data-tags-remove="${i}" aria-label="移除标签 ${escapeHtml(t)}">×</button></span>`).join('')
       : '<span class="hint">暂无标签</span>';
   }
   const sugg = panel.querySelector('.tags-edit-suggest');
@@ -2257,7 +2262,7 @@ function buildTagsPanel(item) {
       <button type="button" class="secondary small" data-tags-cancel>取消</button>
     </div>
     <div class="tags-edit-suggest tag-suggestions"></div>
-    <p class="hint">每条最多 10 个标签，单个最长 24 字；点下方已有标签可直接选用，长按标签可拖动排序。保存后会回读 KV 确认。</p>`;
+    <p class="hint">每条最多 10 个标签，单个最长 24 字；点下方已有标签可直接选用，按住标签左端的拖柄可拖动排序。保存后会回读 KV 确认。</p>`;
   makeSlidable(panel);
   // Same boundary rule as the picker: only strings enter the draft.
   panel._tags = (Array.isArray(item.tags) ? item.tags : []).filter((t) => typeof t === 'string');
